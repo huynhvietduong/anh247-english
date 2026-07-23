@@ -123,7 +123,7 @@ const App = (() => {
     authMode = mode;
     document.getElementById('authtab-login').classList.toggle('active', mode === 'login');
     document.getElementById('authtab-reg').classList.toggle('active', mode === 'reg');
-    document.getElementById('auth-pass2').classList.toggle('hidden', mode === 'login');
+    document.getElementById('pass2-wrap').classList.toggle('hidden', mode === 'login');
     document.getElementById('auth-title').textContent = mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản mới';
     document.getElementById('auth-sub').textContent = mode === 'login'
       ? 'Đăng nhập để tiếp tục lộ trình học của bạn.'
@@ -133,6 +133,15 @@ const App = (() => {
   }
 
   function authErr(msg) { document.getElementById('auth-err').textContent = msg; }
+
+  // Hiện / ẩn mật khẩu (nút con mắt)
+  function togglePass(inputId, btn) {
+    const inp = document.getElementById(inputId);
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    btn.textContent = show ? '🙈' : '👁️';
+    inp.focus();
+  }
 
   function authSubmit() {
     const u = document.getElementById('auth-user').value.trim().toLowerCase();
@@ -1157,6 +1166,6 @@ const App = (() => {
     answerQuiz, flipCard, gradeCard, toggleRecord, nextPhrase, skipSpeakScore,
     openTopic, freeTab: renderFreeTopic, resetAll,
     installApp, toggleReminder, setReminderTime,
-    authTab, authSubmit, logout, adminSetPass, adminResetUser, adminDeleteUser,
+    authTab, authSubmit, logout, adminSetPass, adminResetUser, adminDeleteUser, togglePass,
   };
 })();

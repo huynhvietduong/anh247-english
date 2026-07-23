@@ -256,6 +256,13 @@ main{flex:1;padding:34px 42px;max-width:1060px}
 }
 .auth-inp:focus{border-color:var(--primary)}
 .auth-err{color:var(--red);font-size:13.5px;min-height:20px;margin-bottom:10px}
+.pass-wrap{position:relative}
+.pass-wrap .auth-inp{padding-right:48px}
+.eye-btn{
+  position:absolute;right:6px;top:50%;transform:translateY(calc(-50% - 6px));
+  font-size:17px;padding:8px 10px;border-radius:9px;line-height:1;opacity:.75;
+}
+.eye-btn:hover{opacity:1;background:var(--panel2)}
 .user-chip{
   padding:10px 14px;font-size:13px;color:var(--muted);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
