@@ -128,6 +128,29 @@ main{flex:1;padding:34px 42px;max-width:1060px}
 .day-card.locked{opacity:.42;cursor:not-allowed}
 .day-card.locked::after{content:"🔒";position:absolute;top:10px;right:10px;font-size:12px}
 .day-card.review{background:linear-gradient(135deg,#2a2440,#1f2a40)}
+.day-card.checkpoint{background:linear-gradient(135deg,#3a2a1a,#2a2418);border-color:#5a4326}
+.day-card.checkpoint.done{border-color:var(--green)}
+
+/* ===== Chặng (stage) trên lộ trình ===== */
+.stage-block{margin-bottom:26px}
+.stage-block.active .stage-head{box-shadow:0 0 0 2px var(--sc) inset}
+.stage-head{
+  background:var(--panel);border:1px solid var(--border);border-left:4px solid var(--sc);
+  border-radius:var(--radius);padding:16px 18px;margin-bottom:14px;
+}
+.stage-head-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.stage-title{font-size:16.5px;font-weight:800;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.stage-en{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.stage-badge{font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:99px;background:rgba(46,204,143,.15);color:var(--green);text-transform:uppercase;letter-spacing:.4px}
+.stage-badge.cur{background:rgba(79,124,255,.16);color:var(--primary2)}
+.stage-goal{color:var(--muted);font-size:13px;margin-top:8px;line-height:1.5}
+.stage-clear{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin:0 auto 18px;max-width:420px;background:var(--panel2)}
+.t-stage{font-size:12px;font-weight:700;color:#9fb4ff;margin-bottom:6px}
+select#mpd{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text);
+  border-radius:9px;padding:8px 12px;font-size:14px;outline:none;cursor:pointer;
+}
+select#mpd:focus{border-color:var(--primary)}
 
 /* ===== Lesson ===== */
 .lesson-head{display:flex;align-items:center;gap:14px;margin-bottom:22px}

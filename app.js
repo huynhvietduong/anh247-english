@@ -54,6 +54,8 @@ const App = (() => {
         if (!('lastNotified' in s)) s.lastNotified = null;
         if (!s.push) s.push = { enabled: false, times: ['07:00', '12:30', '20:00'] };
         if (!s.missions) s.missions = {};
+        if (!s.weak) s.weak = {};                 // { "tid|w": số lần sai } — điểm yếu cần ôn thêm
+        if (!('minutesPerDay' in s)) s.minutesPerDay = 15;
         return s;
       }
     } catch (e) {}
@@ -75,6 +77,8 @@ const App = (() => {
       lastNotified: null,
       push: { enabled: false, times: ['07:00', '12:30', '20:00'] },
       missions: {},               // { 'YYYY-MM-DD': true } — thử thách đời thực đã làm
+      weak: {},                   // { "tid|w": số lần sai } — ôn tập thích ứng ưu tiên chỗ yếu
+      minutesPerDay: 15,          // dùng cho Study Plan (ước tính ngày hoàn thành)
     };
   }
 
@@ -89,49 +93,93 @@ const App = (() => {
   const fmtDate = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const todayStr = () => fmtDate(new Date());
 
+  // Các chủ đề "Thực chiến" (kỹ năng giao tiếp xuyên suốt)
+  const FUNC_IDS = ['survival-basics', 'polite-requests', 'reactions', 'opinions', 'conversation-flow'];
+
+  // ---------- CHẶNG (stages) — chia lộ trình theo mục tiêu "làm được gì", giống Duolingo/Busuu ----------
+  const STAGES = [
+    {
+      name: 'Sinh tồn', en: 'Survival', icon: '🌱', color: '#2ecc8f',
+      goal: 'Chào hỏi, giới thiệu bản thân, hỏi lại khi chưa hiểu và nhờ người khác giúp đỡ.',
+      topics: ['greetings', 'family', 'numbers-time', 'survival-basics', 'polite-requests'],
+    },
+    {
+      name: 'Đời sống hằng ngày', en: 'Daily Life', icon: '🏙️', color: '#4f7cff',
+      goal: 'Tự xoay xở khi ăn uống, mua sắm, hỏi đường và nói về thói quen, thời tiết.',
+      topics: ['daily-routine', 'food', 'shopping', 'directions', 'weather'],
+    },
+    {
+      name: 'Giao tiếp xã hội', en: 'Social', icon: '💬', color: '#ffc94d',
+      goal: 'Trò chuyện về công việc, sở thích, sức khỏe; đặt lịch hẹn; bày tỏ cảm xúc và ý kiến.',
+      topics: ['hobbies', 'work', 'health', 'phone', 'travel', 'feelings', 'reactions', 'opinions'],
+    },
+    {
+      name: 'Làm chủ hội thoại', en: 'Fluency', icon: '🚀', color: '#ff6b7a',
+      goal: 'Xử lý tình huống phức tạp, giữ nhịp hội thoại tự nhiên và ứng phó khi khẩn cấp.',
+      topics: ['money', 'study', 'sports', 'party', 'technology', 'emergency', 'smalltalk', 'conversation-flow'],
+    },
+  ];
+
   // ---------- Tạo lộ trình tự động theo trình độ ----------
-  function buildPlan(level) {
-    const regular = TOPICS.filter(t => !FUNC_IDS.includes(t.id));
-    const funcs = FUNC_IDS.map(id => TOPICS.find(t => t.id === id)).filter(Boolean);
-    const lv1 = regular.filter(t => t.level === 1).map(t => t.id);
-    const lv2 = regular.filter(t => t.level === 2).map(t => t.id);
-    const lv3 = regular.filter(t => t.level === 3).map(t => t.id);
+  function buildStage(stageIdx, level) {
+    const st = STAGES[stageIdx];
+    const stTopics = st.topics.map(topicById).filter(Boolean);
+    const funcs = stTopics.filter(t => FUNC_IDS.includes(t.id));
+    const regs = stTopics.filter(t => !FUNC_IDS.includes(t.id));
 
     const pair = arr => {
       const out = [];
-      for (let i = 0; i < arr.length; i += 2) out.push(arr.slice(i, i + 2));
+      for (let i = 0; i < arr.length; i += 2) out.push(arr.slice(i, i + 2).map(t => t.id));
       return out;
     };
 
-    let lessonGroups; // mỗi phần tử = mảng topicId học trong 1 ngày
-    if (level === 1) lessonGroups = [...lv1, ...lv2, ...lv3].map(id => [id]);
-    else if (level === 2) lessonGroups = [...pair(lv1), ...[...lv2, ...lv3].map(id => [id])];
-    else lessonGroups = [...pair(lv1), ...pair(lv2), ...lv3.map(id => [id])];
+    // Nhịp học tùy trình độ: cao hơn thì ghép nhiều chủ đề vào 1 ngày (học nhanh hơn)
+    let regGroups;
+    if (level === 1) regGroups = regs.map(t => [t.id]);
+    else if (level === 2) {
+      const easy = regs.filter(t => t.level === 1), hard = regs.filter(t => t.level !== 1);
+      regGroups = [...pair(easy), ...hard.map(t => [t.id])];
+    } else regGroups = pair(regs);
 
-    // Xen kẽ bài "Thực chiến": cứ 3 bài chủ đề → 1 bài kỹ năng giao tiếp xuyên suốt
-    const merged = [];
+    // Xen kẽ bài "Thực chiến": cứ 2 bài chủ đề → 1 bài kỹ năng
+    const days = [];
     let fi = 0;
-    lessonGroups.forEach((g, i) => {
-      merged.push(g);
-      if ((i + 1) % 3 === 0 && fi < funcs.length) merged.push([funcs[fi++].id]);
+    regGroups.forEach((g, i) => {
+      days.push({ t: 'lesson', topics: g, stage: stageIdx });
+      if ((i + 1) % 2 === 0 && fi < funcs.length) days.push({ t: 'lesson', topics: [funcs[fi++].id], stage: stageIdx });
     });
-    while (fi < funcs.length) merged.push([funcs[fi++].id]);
-    lessonGroups = merged;
+    while (fi < funcs.length) days.push({ t: 'lesson', topics: [funcs[fi++].id], stage: stageIdx });
 
+    // Chèn ngày ôn sau mỗi 3 ngày học
+    const out = [];
+    let lc = 0;
+    days.forEach(d => {
+      out.push(d);
+      if (++lc % 3 === 0) out.push({ t: 'review', stage: stageIdx });
+    });
+    // Checkpoint cuối chặng
+    out.push({ t: 'checkpoint', stage: stageIdx });
+    return out;
+  }
+
+  function buildPlan(level) {
     const plan = [];
-    let count = 0;
-    for (const g of lessonGroups) {
-      plan.push({ t: 'lesson', topics: g });
-      count++;
-      if (count % 4 === 0) plan.push({ t: 'review' });
-    }
-    if (count % 4 !== 0) plan.push({ t: 'review' });
-    plan.push({ t: 'final', kind: 'speaking' });
-    plan.push({ t: 'final', kind: 'quiz' });
+    STAGES.forEach((st, i) => plan.push(...buildStage(i, level)));
+    plan.push({ t: 'final', kind: 'speaking', stage: STAGES.length - 1 });
+    plan.push({ t: 'final', kind: 'quiz', stage: STAGES.length - 1 });
     return plan;
   }
-  // Các chủ đề "Thực chiến" (kỹ năng giao tiếp xuyên suốt) — xen kẽ vào lộ trình
-  const FUNC_IDS = ['survival-basics', 'polite-requests', 'reactions', 'opinions', 'conversation-flow'];
+
+  // Chỉ số chặng của một ngày (an toàn với dữ liệu cũ chưa có stage)
+  const stageOf = d => (d && typeof d.stage === 'number') ? d.stage : 0;
+  // Các ngày (index) thuộc một chặng
+  const daysInStage = idx => S.plan.map((d, i) => stageOf(d) === idx ? i : -1).filter(i => i >= 0);
+  // Chặng hiện tại đang học
+  function currentStage() {
+    const cur = currentDayIdx();
+    return cur === -1 ? STAGES.length - 1 : stageOf(S.plan[cur]);
+  }
+  const stageDone = idx => daysInStage(idx).every(i => S.done.includes(i));
 
   // ---------- Đăng nhập / Đăng ký ----------
   let authMode = 'login';
@@ -388,7 +436,8 @@ const App = (() => {
       const ts = d.topics.map(id => topicById(id));
       return { icon: ts[0].icon, name: ts.map(t => t.name).join(' + ') };
     }
-    if (d.t === 'review') return { icon: '🔁', name: 'Ôn tập tổng hợp' };
+    if (d.t === 'review') return { icon: d.adaptive ? '🎯' : '🔁', name: d.adaptive ? 'Ôn tập điểm yếu' : 'Ôn tập tổng hợp' };
+    if (d.t === 'checkpoint') return { icon: '🏅', name: 'Checkpoint: Kiểm tra chặng' };
     return d.kind === 'quiz'
       ? { icon: '🏁', name: 'Bài kiểm tra cuối khóa' }
       : { icon: '🎤', name: 'Thử thách luyện nói' };
@@ -411,15 +460,41 @@ const App = (() => {
       </div></div>`;
     } else {
       const lbl = dayLabel(S.plan[cur], cur);
+      const si = currentStage();
+      const st = STAGES[si];
+      const stTag = st ? `<div class="t-stage">${st.icon} Chặng ${si + 1}: ${st.name} · ${daysInStage(si).filter(x => S.done.includes(x)).length}/${daysInStage(si).length}</div>` : '';
       todayHtml = `<div class="today-card">
         <div>
+          ${stTag}
           <h3>Bài học hôm nay — Ngày ${cur + 1}/${S.plan.length}</h3>
           <div class="t-title">${lbl.icon} ${lbl.name}</div>
-          <div class="t-desc">Hoàn thành từ vựng, mẫu câu, hội thoại và quiz để mở khóa ngày tiếp theo.</div>
+          <div class="t-desc">🎯 ${st ? esc(st.goal) : 'Hoàn thành để mở khóa ngày tiếp theo.'}</div>
         </div>
         <button class="btn btn-primary" onclick="App.go('day',${cur})">Học ngay →</button>
       </div>`;
     }
+
+    // Study Plan — ước tính ngày hoàn thành theo số phút học mỗi ngày
+    const remaining = S.plan.length - S.done.length;
+    const perDay = Math.max(1, Math.round((S.minutesPerDay || 15) / 15));
+    const daysNeeded = Math.ceil(remaining / perDay);
+    const finish = new Date(); finish.setDate(finish.getDate() + daysNeeded);
+    const finishStr = finish.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const planHtml = cur === -1 ? '' : `
+      <div class="panel">
+        <h3>📅 Kế hoạch học của bạn</h3>
+        <div class="set-row" style="border:none;padding-top:0">
+          <div>
+            <div class="set-name">Mỗi ngày bạn học khoảng</div>
+            <div class="set-desc">Còn <b>${remaining}</b> ngày học · dự kiến hoàn thành <b style="color:var(--green)">${finishStr}</b></div>
+          </div>
+          <div class="set-ctrl">
+            <select id="mpd" onchange="App.setMinutes(this.value)">
+              ${[5, 10, 15, 30, 45].map(m => `<option value="${m}" ${S.minutesPerDay === m ? 'selected' : ''}>${m} phút</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>`;
 
     const missionDone = !!S.missions[todayStr()];
     main().innerHTML = `
@@ -446,8 +521,9 @@ const App = (() => {
       <div class="panel">
         <h3>Tiến độ lộ trình</h3>
         <div class="progress-line"><div class="fill" style="width:${pct}%"></div></div>
-        <div style="color:var(--muted);font-size:13.5px">${pct}% hoàn thành</div>
+        <div style="color:var(--muted);font-size:13.5px">${pct}% hoàn thành${Object.keys(S.weak).length ? ` · 🎯 ${Object.keys(S.weak).length} mục đang cần ôn thêm` : ''}</div>
       </div>
+      ${planHtml}
       ${due > 0 ? `<div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
         <div><h3 style="margin-bottom:4px">🃏 Có ${due} thẻ từ vựng đến hạn ôn</h3>
         <div style="color:var(--muted);font-size:13.5px">Ôn ngay để không quên những gì đã học.</div></div>
@@ -503,24 +579,61 @@ const App = (() => {
   }
 
   // ---------- Lộ trình ----------
+  function dayCardHtml(d, i, cur) {
+    const lbl = dayLabel(d, i);
+    const done = S.done.includes(i);
+    const locked = !done && i !== cur;
+    const special = d.t === 'review' || d.t === 'final';
+    const cls = ['day-card', special ? 'review' : '', d.t === 'checkpoint' ? 'checkpoint' : '',
+      done ? 'done' : '', i === cur ? 'current' : '', locked ? 'locked' : ''].join(' ');
+    return `<button class="${cls}" ${locked ? 'disabled' : `onclick="App.go('day',${i})"`}>
+      <span class="d-num">Ngày ${i + 1}</span>
+      <span class="d-ico">${lbl.icon}</span>
+      <span class="d-name">${lbl.name}</span>
+    </button>`;
+  }
+
   function renderRoadmap() {
     const cur = currentDayIdx();
-    const cards = S.plan.map((d, i) => {
-      const lbl = dayLabel(d, i);
-      const done = S.done.includes(i);
-      const locked = !done && i !== cur;
-      const cls = ['day-card', d.t === 'review' || d.t === 'final' ? 'review' : '',
-        done ? 'done' : '', i === cur ? 'current' : '', locked ? 'locked' : ''].join(' ');
-      return `<button class="${cls}" ${locked ? 'disabled' : `onclick="App.go('day',${i})"`}>
-        <span class="d-num">Ngày ${i + 1}</span>
-        <span class="d-ico">${lbl.icon}</span>
-        <span class="d-name">${lbl.name}</span>
-      </button>`;
+    const curStage = currentStage();
+    const hasStages = S.plan.some(d => typeof d.stage === 'number');
+    let sections;
+    if (hasStages) {
+      sections = STAGES.map((st, si) => ({ st, si, idxs: daysInStage(si) })).filter(s => s.idxs.length);
+    } else {
+      sections = [{ st: null, si: 0, idxs: S.plan.map((_, i) => i) }];
+    }
+
+    const html = sections.map(({ st, si, idxs }) => {
+      const total = idxs.length;
+      const doneN = idxs.filter(i => S.done.includes(i)).length;
+      const pct = Math.round(doneN / total * 100);
+      const isDone = doneN === total;
+      const isCurrent = si === curStage && !isDone;
+      const cards = idxs.map(i => dayCardHtml(S.plan[i], i, cur)).join('');
+      let header = '';
+      if (st) {
+        const canTestOut = isCurrent;
+        header = `<div class="stage-head" style="--sc:${st.color}">
+          <div class="stage-head-top">
+            <div class="stage-title">${st.icon} Chặng ${si + 1}: ${st.name}
+              <span class="stage-en">${st.en}</span>
+              ${isDone ? '<span class="stage-badge">✓ Hoàn thành</span>' : isCurrent ? '<span class="stage-badge cur">Đang học</span>' : ''}
+            </div>
+            ${canTestOut ? `<button class="btn btn-sm btn-outline" onclick="App.startTestOut(${si})">🎓 Thi vượt chặng</button>` : ''}
+          </div>
+          <div class="stage-goal">🎯 Học xong bạn có thể: ${esc(st.goal)}</div>
+          <div class="mini-bar" style="margin-top:8px"><div style="width:${pct}%;background:${st.color}"></div></div>
+          <div class="td-sub" style="margin-top:4px">${doneN}/${total} ngày</div>
+        </div>`;
+      }
+      return `<div class="stage-block ${isCurrent ? 'active' : ''}">${header}<div class="roadmap-grid">${cards}</div></div>`;
     }).join('');
+
     main().innerHTML = `
       <div class="view-title">🗺️ Lộ trình ${S.plan.length} ngày</div>
-      <div class="view-sub">Được tạo tự động theo trình độ của bạn. Hoàn thành mỗi ngày để mở khóa ngày tiếp theo.</div>
-      <div class="roadmap-grid">${cards}</div>`;
+      <div class="view-sub">${STAGES.length} chặng theo mục tiêu giao tiếp. Hoàn thành mỗi ngày để mở khóa ngày tiếp theo — hoặc <b>thi vượt chặng</b> nếu bạn đã vững.</div>
+      ${html}`;
   }
 
   // ---------- Ngày học ----------
@@ -529,7 +642,8 @@ const App = (() => {
   function renderDay(i) {
     const d = S.plan[i];
     if (d.t === 'lesson') renderLesson(i, d.topics, 0);
-    else if (d.t === 'review') startQuiz(i, buildReviewQuiz(10), 'Ôn tập tổng hợp', true);
+    else if (d.t === 'review') startQuiz(i, buildReviewQuiz(10, d.adaptive), d.adaptive ? 'Ôn tập điểm yếu' : 'Ôn tập tổng hợp', true);
+    else if (d.t === 'checkpoint') startQuiz(i, buildStageQuiz(stageOf(d), 12), `Checkpoint: ${STAGES[stageOf(d)].name}`, true, [], 60);
     else if (d.kind === 'quiz') startQuiz(i, buildReviewQuiz(15), 'Bài kiểm tra cuối khóa', true);
     else renderSpeakingChallenge(i);
   }
@@ -623,42 +737,62 @@ const App = (() => {
   // ---------- Quiz ----------
   function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
+  // pool item mang theo tid (topic id) để chấm điểm yếu; makeQuestion gắn `item`
+  const poolOf = ids => [...new Set(ids)].flatMap(id => vocabOf(topicById(id)).map(v => ({ ...v, tid: id })));
+
   function makeQuestion(v, pool, type) {
     const others = shuffle(pool.filter(x => x.w !== v.w)).slice(0, 3);
+    const item = v.tid ? { tid: v.tid, w: v.w } : null;
     if (type === 0) { // nghĩa -> từ
       const opts = shuffle([v.w, ...others.map(o => o.w)]);
-      return { q: `Từ tiếng Anh nào có nghĩa là “${v.m}”?`, opts, a: opts.indexOf(v.w) };
+      return { q: `Từ/cụm tiếng Anh nào có nghĩa là “${v.m}”?`, opts, a: opts.indexOf(v.w), item };
     }
     if (type === 1) { // từ -> nghĩa
       const opts = shuffle([v.m, ...others.map(o => o.m)]);
-      return { q: `“${v.w}” có nghĩa là gì?`, opts, a: opts.indexOf(v.m), listen: v.w };
+      return { q: `“${v.w}” có nghĩa là gì?`, opts, a: opts.indexOf(v.m), listen: v.w, item };
     }
     if (type === 2) { // nghe -> chọn từ
       const opts = shuffle([v.w, ...others.map(o => o.w)]);
-      return { q: '🔊 Nghe và chọn từ bạn nghe được:', opts, a: opts.indexOf(v.w), listen: v.w, auto: true };
+      return { q: '🔊 Nghe và chọn đáp án bạn nghe được:', opts, a: opts.indexOf(v.w), listen: v.w, auto: true, item };
     }
     // điền vào chỗ trống trong câu ví dụ
     const blanked = v.ex.replace(new RegExp(v.w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '_____');
     const opts = shuffle([v.w, ...others.map(o => o.w)]);
-    return { q: `Điền vào chỗ trống: “${blanked}”`, opts, a: opts.indexOf(v.w) };
+    return { q: `Điền vào chỗ trống: “${blanked}”`, opts, a: opts.indexOf(v.w), item };
+  }
+
+  // Ưu tiên chỗ yếu: đưa các mục hay sai (S.weak) lên đầu pool trước khi lấy n mục
+  function pickWeakFirst(pool, n) {
+    const weakKeys = new Set(Object.keys(S.weak));
+    const weak = shuffle(pool.filter(v => weakKeys.has(v.tid + '|' + v.w)));
+    const rest = shuffle(pool.filter(v => !weakKeys.has(v.tid + '|' + v.w)));
+    return [...weak, ...rest].slice(0, n);
   }
 
   function buildTopicQuiz(topicIds) {
-    const pool = topicIds.flatMap(id => vocabOf(topicById(id)));
+    const pool = poolOf(topicIds);
     const picked = shuffle(pool).slice(0, 10);
     return picked.map((v, i) => makeQuestion(v, pool, i % 4));
   }
 
-  function buildReviewQuiz(n) {
+  function buildReviewQuiz(n, adaptive) {
     let ids = learnedTopicIds();
     if (ids.length === 0) ids = [TOPICS[0].id];
-    const pool = [...new Set(ids)].flatMap(id => vocabOf(topicById(id)));
-    const picked = shuffle(pool).slice(0, n);
+    const pool = poolOf(ids);
+    const picked = adaptive ? pickWeakFirst(pool, n) : shuffle(pool).slice(0, n);
     return picked.map((v, i) => makeQuestion(v, pool, i % 4));
   }
 
-  function startQuiz(dayIdx, questions, title, isReviewDay, topicIds) {
-    quizState = { dayIdx, questions, idx: 0, correct: 0, isReviewDay, topicIds: topicIds || [] , title };
+  // Quiz của cả một chặng (dùng cho checkpoint & thi vượt chặng)
+  function buildStageQuiz(stageIdx, n) {
+    const ids = STAGES[stageIdx].topics.filter(topicById);
+    const pool = poolOf(ids);
+    const picked = shuffle(pool).slice(0, Math.min(n, pool.length));
+    return picked.map((v, i) => makeQuestion(v, pool, i % 4));
+  }
+
+  function startQuiz(dayIdx, questions, title, isReviewDay, topicIds, passPct) {
+    quizState = { dayIdx, questions, idx: 0, correct: 0, isReviewDay, topicIds: topicIds || [], title, passPct: passPct || 60 };
     renderQuizQ();
   }
 
@@ -694,6 +828,16 @@ const App = (() => {
     if (!ok) opts[i].classList.add('wrong');
     else qs.correct++;
     S.quizStats.total++; if (ok) S.quizStats.correct++;
+    // Ôn tập thích ứng: ghi nhận đúng/sai từng mục
+    if (q.item) {
+      const key = q.item.tid + '|' + q.item.w;
+      if (ok) {
+        if (S.weak[key]) { if (--S.weak[key] <= 0) delete S.weak[key]; }
+      } else {
+        S.weak[key] = (S.weak[key] || 0) + 1;
+        S.srs[key] = { box: 0, due: todayStr() };   // sai → ôn lại ngay trong flashcard
+      }
+    }
     save();
     setTimeout(() => {
       qs.idx++;
@@ -701,23 +845,73 @@ const App = (() => {
     }, ok ? 700 : 1400);
   }
 
+  // Chèn 1 ngày vào lộ trình, dịch các chỉ số 'done' phía sau để không lệch
+  function insertDay(pos, day) {
+    S.plan.splice(pos, 0, day);
+    S.done = S.done.map(idx => idx >= pos ? idx + 1 : idx);
+    save();
+  }
+
   function finishQuiz() {
     const qs = quizState;
     const pct = Math.round(qs.correct / qs.questions.length * 100);
-    const passed = pct >= 60;
+    const passed = pct >= qs.passPct;
+
+    // Thi vượt chặng: đạt → đánh dấu cả chặng hoàn thành + nạp từ vựng vào SRS
+    if (typeof qs.testOut === 'number') {
+      if (passed) {
+        STAGES[qs.testOut].topics.forEach(addTopicToSrs);
+        daysInStage(qs.testOut).forEach(i => { if (!S.done.includes(i)) S.done.push(i); });
+        touchStreak();
+        save();
+      }
+      const cur = currentDayIdx();
+      main().innerHTML = `
+        <div class="quiz-box" style="text-align:center;padding-top:40px">
+          <div style="font-size:60px;margin-bottom:14px">${passed ? '🎓' : '💪'}</div>
+          <div class="view-title">${passed ? 'Vượt chặng thành công!' : 'Chưa đạt — học bình thường nhé'}</div>
+          <p style="color:var(--muted);margin:10px 0 24px">
+            Đúng <b style="color:var(--text)">${qs.correct}/${qs.questions.length}</b> câu (${pct}%).
+            ${passed ? `Bạn đã bỏ qua chặng "${STAGES[qs.testOut].name}" và toàn bộ từ vựng chặng này đã vào flashcard.` : 'Cần ≥ 80% để vượt chặng. Đừng lo, cứ học tuần tự sẽ vững hơn!'}
+          </p>
+          <button class="btn btn-primary btn-lg" style="max-width:340px" onclick="App.go('roadmap')">${passed ? 'Xem lộ trình →' : 'Về lộ trình'}</button>
+        </div>`;
+      return;
+    }
+
+    const day = S.plan[qs.dayIdx];
+    let extraNote = '';
     if (passed) {
       markDone(qs.dayIdx);
       qs.topicIds.forEach(addTopicToSrs);
+      // Ôn tập thích ứng: bài học có từ 3 lỗi trở lên → tự chèn 1 ngày "ôn điểm yếu" ngay sau
+      const wrong = qs.questions.length - qs.correct;
+      const nextIsAdaptive = S.plan[qs.dayIdx + 1] && S.plan[qs.dayIdx + 1].adaptive;
+      if (day && day.t === 'lesson' && wrong >= 3 && !nextIsAdaptive) {
+        insertDay(qs.dayIdx + 1, { t: 'review', stage: stageOf(day), adaptive: true });
+        extraNote = 'Bạn sai khá nhiều — mình đã thêm một ngày <b>ôn điểm yếu</b> ngay sau để bạn nhớ chắc hơn.';
+      }
     }
     const cur = currentDayIdx();
+    // Vừa hoàn thành checkpoint → chúc mừng qua chặng
+    let banner = '';
+    if (passed && day && day.t === 'checkpoint') {
+      const st = STAGES[stageOf(day)];
+      banner = `<div class="stage-clear" style="border-color:${st.color}">
+        <div style="font-size:15px;font-weight:800;color:${st.color}">🏅 Hoàn thành chặng: ${st.name}</div>
+        <div style="font-size:13.5px;color:var(--muted);margin-top:4px">Giờ bạn đã có thể: ${esc(st.goal)}</div>
+      </div>`;
+    }
     main().innerHTML = `
       <div class="quiz-box" style="text-align:center;padding-top:40px">
         <div style="font-size:60px;margin-bottom:14px">${passed ? '🎉' : '💪'}</div>
         <div class="view-title">${passed ? 'Hoàn thành!' : 'Cố lên, thử lại nhé!'}</div>
-        <p style="color:var(--muted);margin:10px 0 24px">
+        <p style="color:var(--muted);margin:10px 0 18px">
           Bạn trả lời đúng <b style="color:var(--text)">${qs.correct}/${qs.questions.length}</b> câu (${pct}%).
-          ${passed ? 'Ngày học đã được đánh dấu hoàn thành, từ vựng đã thêm vào bộ flashcard.' : 'Cần đạt tối thiểu 60% để hoàn thành ngày học.'}
+          ${passed ? 'Ngày học đã hoàn thành, từ vựng &amp; cụm giao tiếp đã vào bộ flashcard.' : `Cần đạt tối thiểu ${qs.passPct}% để qua ngày học.`}
         </p>
+        ${banner}
+        ${extraNote ? `<p style="color:var(--yellow);font-size:13.5px;margin-bottom:18px">${extraNote}</p>` : ''}
         ${passed
           ? (cur !== -1
               ? `<button class="btn btn-primary btn-lg" style="max-width:340px" onclick="App.go('day',${cur})">Học ngày tiếp theo →</button>`
@@ -726,6 +920,16 @@ const App = (() => {
         <div><button class="btn btn-ghost" onclick="App.go('roadmap')">Về lộ trình</button></div>
       </div>`;
   }
+
+  // ---------- Thi vượt chặng (test-out) — cho người giỏi bỏ qua cả chặng ----------
+  function startTestOut(stageIdx) {
+    const st = STAGES[stageIdx];
+    if (!confirm(`Thi vượt chặng "${st.name}"?\n\nBạn cần đúng ≥ 80% (12 câu) để bỏ qua toàn bộ chặng này. Nếu không đạt, bạn vẫn học bình thường.`)) return;
+    testOutStage = stageIdx;
+    quizState = { dayIdx: -1, questions: buildStageQuiz(stageIdx, 12), idx: 0, correct: 0, isReviewDay: true, topicIds: [], title: `🎓 Thi vượt: ${st.name}`, passPct: 80, testOut: stageIdx };
+    renderQuizQ();
+  }
+  let testOutStage = null;
 
   // ---------- Flashcards (SRS) ----------
   let fcQueue = [], fcFlipped = false;
@@ -1363,6 +1567,12 @@ const App = (() => {
     renderDashboard();
   }
 
+  function setMinutes(v) {
+    S.minutesPerDay = parseInt(v, 10) || 15;
+    save();
+    renderDashboard();
+  }
+
   // Khóa zoom: iOS Safari bỏ qua user-scalable=no nên chặn thêm cử chỉ véo 2 ngón.
   // Double-tap zoom đã bị vô hiệu bằng CSS touch-action:manipulation (không phá thao tác bấm nhanh).
   function lockZoom() {
@@ -1403,6 +1613,6 @@ const App = (() => {
     openTopic, freeTab: renderFreeTopic, resetAll,
     installApp, toggleReminder, setReminderTime,
     authTab, authSubmit, logout, adminSetPass, adminResetUser, adminDeleteUser, togglePass,
-    togglePush, setPushTime, doneMission,
+    togglePush, setPushTime, doneMission, startTestOut, setMinutes,
   };
 })();
