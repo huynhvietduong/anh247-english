@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>EnglishDaily — Học tiếng Anh giao tiếp</title>
+<meta name="theme-color" content="#0f1420">
+<meta name="description" content="Học tiếng Anh giao tiếp hằng ngày: lộ trình tự động, flashcard, luyện nói.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===== MÀN HÌNH CHÀO / KIỂM TRA ĐẦU VÀO ===== -->
+<div id="screen-onboard" class="screen">
+  <div class="onboard-box">
+    <div class="logo-big">🇬🇧 EnglishDaily</div>
+    <h1>Học tiếng Anh giao tiếp hằng ngày</h1>
+    <p class="sub">Làm bài kiểm tra nhanh (10 câu) để hệ thống xếp trình độ và <b>tự động tạo lộ trình học 30 ngày</b> dành riêng cho bạn.</p>
+    <div id="onboard-start">
+      <input id="inp-name" type="text" placeholder="Tên của bạn (ví dụ: Dương)" maxlength="30">
+      <button class="btn btn-primary btn-lg" onclick="App.startPlacement()">🚀 Bắt đầu kiểm tra đầu vào</button>
+      <button class="btn btn-ghost" onclick="App.skipPlacement()">Bỏ qua — bắt đầu từ cơ bản</button>
+    </div>
+    <div id="onboard-quiz" class="hidden">
+      <div class="quiz-progress"><div id="ob-bar" class="bar"></div></div>
+      <div id="ob-qnum" class="qnum"></div>
+      <div id="ob-question" class="ob-question"></div>
+      <div id="ob-options" class="ob-options"></div>
+    </div>
+    <div id="onboard-result" class="hidden">
+      <div class="result-icon">🎉</div>
+      <h2 id="ob-result-title"></h2>
+      <p id="ob-result-desc"></p>
+      <button class="btn btn-primary btn-lg" onclick="App.finishOnboard()">Xem lộ trình của tôi →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== APP CHÍNH ===== -->
+<div id="app" class="hidden">
+  <aside class="sidebar">
+    <div class="logo">🇬🇧 <span>EnglishDaily</span></div>
+    <nav>
+      <button class="nav-item active" data-view="dashboard" onclick="App.go('dashboard')">🏠 <span>Tổng quan</span></button>
+      <button class="nav-item" data-view="roadmap" onclick="App.go('roadmap')">🗺️ <span>Lộ trình</span></button>
+      <button class="nav-item" data-view="flashcards" onclick="App.go('flashcards')">🃏 <span>Flashcard</span></button>
+      <button class="nav-item" data-view="speaking" onclick="App.go('speaking')">🎤 <span>Luyện nói</span></button>
+      <button class="nav-item" data-view="topics" onclick="App.go('topics')">📚 <span>Chủ đề</span></button>
+    </nav>
+    <div class="sidebar-foot">
+      <button class="nav-item hidden" id="btn-install" onclick="App.installApp()">📲 <span>Cài đặt app</span></button>
+      <button class="nav-item" onclick="App.resetAll()">🔄 <span>Làm lại từ đầu</span></button>
+    </div>
+  </aside>
+
+  <main id="main"></main>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
