@@ -79,15 +79,23 @@ const App = (() => {
   }
 
   const topicById = id => TOPICS.find(t => t.id === id);
+  // Gộp từ vựng + cụm giao tiếp thành một "kho học liệu" chung cho SRS/quiz/thông báo
+  const vocabOf = t => t.vocab.concat((t.chunks || []).map(k => ({ w: k.c, ipa: '', m: k.m, ex: k.ex })));
+  function findItem(tid, w) {
+    const t = topicById(tid);
+    return t ? vocabOf(t).find(x => x.w === w) : null;
+  }
   // Định dạng ngày theo giờ ĐỊA PHƯƠNG (không dùng toISOString vì lệch múi giờ UTC)
   const fmtDate = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const todayStr = () => fmtDate(new Date());
 
   // ---------- Tạo lộ trình tự động theo trình độ ----------
   function buildPlan(level) {
-    const lv1 = TOPICS.filter(t => t.level === 1).map(t => t.id);
-    const lv2 = TOPICS.filter(t => t.level === 2).map(t => t.id);
-    const lv3 = TOPICS.filter(t => t.level === 3).map(t => t.id);
+    const regular = TOPICS.filter(t => !FUNC_IDS.includes(t.id));
+    const funcs = FUNC_IDS.map(id => TOPICS.find(t => t.id === id)).filter(Boolean);
+    const lv1 = regular.filter(t => t.level === 1).map(t => t.id);
+    const lv2 = regular.filter(t => t.level === 2).map(t => t.id);
+    const lv3 = regular.filter(t => t.level === 3).map(t => t.id);
 
     const pair = arr => {
       const out = [];
@@ -100,6 +108,16 @@ const App = (() => {
     else if (level === 2) lessonGroups = [...pair(lv1), ...[...lv2, ...lv3].map(id => [id])];
     else lessonGroups = [...pair(lv1), ...pair(lv2), ...lv3.map(id => [id])];
 
+    // Xen kẽ bài "Thực chiến": cứ 3 bài chủ đề → 1 bài kỹ năng giao tiếp xuyên suốt
+    const merged = [];
+    let fi = 0;
+    lessonGroups.forEach((g, i) => {
+      merged.push(g);
+      if ((i + 1) % 3 === 0 && fi < funcs.length) merged.push([funcs[fi++].id]);
+    });
+    while (fi < funcs.length) merged.push([funcs[fi++].id]);
+    lessonGroups = merged;
+
     const plan = [];
     let count = 0;
     for (const g of lessonGroups) {
@@ -110,12 +128,10 @@ const App = (() => {
     if (count % 4 !== 0) plan.push({ t: 'review' });
     plan.push({ t: 'final', kind: 'speaking' });
     plan.push({ t: 'final', kind: 'quiz' });
-    // Trình độ cơ bản: bổ sung ngày ôn để tròn lộ trình 30 ngày
-    while (level === 1 && plan.length < 30) {
-      plan.splice(plan.length - 2, 0, { t: 'review' });
-    }
     return plan;
   }
+  // Các chủ đề "Thực chiến" (kỹ năng giao tiếp xuyên suốt) — xen kẽ vào lộ trình
+  const FUNC_IDS = ['survival-basics', 'polite-requests', 'reactions', 'opinions', 'conversation-flow'];
 
   // ---------- Đăng nhập / Đăng ký ----------
   let authMode = 'login';
@@ -258,9 +274,9 @@ const App = (() => {
     save();
     const names = { 1: 'Cơ bản (Beginner)', 2: 'Sơ trung cấp (Elementary)', 3: 'Trung cấp (Intermediate)' };
     const descs = {
-      1: 'Bạn sẽ bắt đầu từ nền tảng: chào hỏi, gia đình, thời gian… Lộ trình 30 ngày đầy đủ đã được tạo cho bạn.',
+      1: 'Bạn sẽ bắt đầu từ nền tảng: chào hỏi, gia đình, thời gian… xen kẽ các bài "Thực chiến" giúp giao tiếp được ngay.',
       2: 'Bạn đã nắm những điều cơ bản. Lộ trình rút gọn — các chủ đề dễ được học nhanh gấp đôi.',
-      3: 'Trình độ của bạn khá tốt! Lộ trình tăng tốc, tập trung vào các chủ đề giao tiếp nâng cao.',
+      3: 'Trình độ của bạn khá tốt! Lộ trình tăng tốc, tập trung vào cụm giao tiếp và chủ đề nâng cao.',
     };
     document.getElementById('onboard-quiz').classList.add('hidden');
     document.getElementById('onboard-result').classList.remove('hidden');
@@ -333,7 +349,8 @@ const App = (() => {
 
   function addTopicToSrs(topicId) {
     const t = topicById(topicId);
-    t.vocab.forEach(v => {
+    if (!t) return;
+    vocabOf(t).forEach(v => {
       const key = topicId + '|' + v.w;
       if (!S.srs[key]) S.srs[key] = { box: 0, due: todayStr() };
     });
@@ -345,11 +362,11 @@ const App = (() => {
     return Object.entries(S.srs)
       .filter(([, c]) => c.due <= today)
       .map(([key, c]) => {
-        const [tid, w] = key.split('|');
-        const t = topicById(tid);
-        const v = t.vocab.find(x => x.w === w);
-        return { key, card: c, v, topic: t };
-      });
+        const [tid, ...rest] = key.split('|');
+        const v = findItem(tid, rest.join('|'));
+        return v ? { key, card: c, v, topic: topicById(tid) } : null;
+      })
+      .filter(Boolean);
   }
 
   // ---------- Phát âm (TTS) ----------
@@ -519,7 +536,7 @@ const App = (() => {
 
   function renderLesson(dayIdx, topicIds, tab) {
     const ts = topicIds.map(topicById);
-    const tabNames = ['📖 Từ vựng', '💬 Mẫu câu', '🗣️ Hội thoại', '✅ Quiz'];
+    const tabNames = ['📖 Từ vựng', '🗣️ Cụm giao tiếp', '💬 Mẫu câu', '🎭 Hội thoại', '✅ Quiz'];
     const tabsHtml = tabNames.map((n, k) =>
       `<button class="tab ${k === tab ? 'active' : ''}" onclick="App.lessonTab(${dayIdx},${k})">${n}</button>`).join('');
 
@@ -537,13 +554,26 @@ const App = (() => {
         </div>`).join('');
     } else if (tab === 1) {
       body = ts.map(t => `
+        <h3 style="margin:18px 0 12px">${t.icon} ${t.name} <span style="color:var(--muted);font-weight:400;font-size:13px">· nói nguyên cụm, đừng ghép từng từ!</span></h3>
+        ${(t.chunks || []).map(k => `
+          <div class="phrase-item chunk-item">
+            <div style="flex:1">
+              <div class="p-en">${esc(k.c)}</div>
+              <div class="p-vi">${esc(k.m)}</div>
+              <div class="chunk-use">📌 Khi dùng: ${esc(k.use)}</div>
+              <div class="chunk-ex">“${esc(k.ex)}”</div>
+            </div>
+            <button class="speak-btn" onclick="App.speak('${js(k.c)}')">🔊</button>
+          </div>`).join('')}`).join('');
+    } else if (tab === 2) {
+      body = ts.map(t => `
         <h3 style="margin:18px 0 12px">${t.icon} ${t.name}</h3>
         ${t.phrases.map(p => `
           <div class="phrase-item">
             <div><div class="p-en">${esc(p.en)}</div><div class="p-vi">${esc(p.vi)}</div></div>
             <button class="speak-btn" onclick="App.speak('${js(p.en)}')">🔊</button>
           </div>`).join('')}`).join('');
-    } else if (tab === 2) {
+    } else if (tab === 3) {
       body = ts.map(t => `
         <h3 style="margin:18px 0 12px">${t.icon} ${t.name}</h3>
         <div class="dialog-box">
@@ -570,7 +600,7 @@ const App = (() => {
       <div class="tabs">${tabsHtml}</div>
       ${body}
       <div style="margin-top:24px">
-        ${tab < 3 ? `<button class="btn btn-primary" onclick="App.lessonTab(${dayIdx},${tab + 1})">Tiếp theo: ${tabNames[tab + 1]} →</button>` : ''}
+        ${tab < 4 ? `<button class="btn btn-primary" onclick="App.lessonTab(${dayIdx},${tab + 1})">Tiếp theo: ${tabNames[tab + 1]} →</button>` : ''}
       </div>`;
   }
 
@@ -614,15 +644,15 @@ const App = (() => {
   }
 
   function buildTopicQuiz(topicIds) {
-    const pool = topicIds.flatMap(id => topicById(id).vocab);
-    const picked = shuffle(pool).slice(0, 8);
+    const pool = topicIds.flatMap(id => vocabOf(topicById(id)));
+    const picked = shuffle(pool).slice(0, 10);
     return picked.map((v, i) => makeQuestion(v, pool, i % 4));
   }
 
   function buildReviewQuiz(n) {
     let ids = learnedTopicIds();
     if (ids.length === 0) ids = [TOPICS[0].id];
-    const pool = [...new Set(ids)].flatMap(id => topicById(id).vocab);
+    const pool = [...new Set(ids)].flatMap(id => vocabOf(topicById(id)));
     const picked = shuffle(pool).slice(0, n);
     return picked.map((v, i) => makeQuestion(v, pool, i % 4));
   }
@@ -902,7 +932,7 @@ const App = (() => {
           <button class="topic-card" onclick="App.openTopic('${t.id}')">
             <div class="t-ico">${t.icon}</div>
             <div class="t-name">${t.name}</div>
-            <div class="t-meta">${t.vocab.length} từ vựng · ${t.phrases.length} mẫu câu · 1 hội thoại</div>
+            <div class="t-meta">${t.vocab.length} từ vựng · ${(t.chunks || []).length} cụm giao tiếp · ${t.phrases.length} mẫu câu</div>
             <span class="lvl-badge lvl-${t.level}">${lvName[t.level]}</span>
           </button>`).join('')}
       </div>`;
@@ -919,7 +949,7 @@ const App = (() => {
 
   function renderFreeTopic(id, tab) {
     const t = topicById(id);
-    const tabNames = ['📖 Từ vựng', '💬 Mẫu câu', '🗣️ Hội thoại'];
+    const tabNames = ['📖 Từ vựng', '🗣️ Cụm giao tiếp', '💬 Mẫu câu', '🎭 Hội thoại'];
     const tabsHtml = tabNames.map((n, k) =>
       `<button class="tab ${k === tab ? 'active' : ''}" onclick="App.freeTab('${id}',${k})">${n}</button>`).join('');
     let body = '';
@@ -932,6 +962,17 @@ const App = (() => {
           <div class="v-ex">"${esc(v.ex)}"</div>
         </div>`).join('')}</div>`;
     } else if (tab === 1) {
+      body = (t.chunks || []).map(k => `
+        <div class="phrase-item chunk-item">
+          <div style="flex:1">
+            <div class="p-en">${esc(k.c)}</div>
+            <div class="p-vi">${esc(k.m)}</div>
+            <div class="chunk-use">📌 Khi dùng: ${esc(k.use)}</div>
+            <div class="chunk-ex">“${esc(k.ex)}”</div>
+          </div>
+          <button class="speak-btn" onclick="App.speak('${js(k.c)}')">🔊</button>
+        </div>`).join('') || '<div class="empty-note">Chủ đề này chưa có cụm giao tiếp.</div>';
+    } else if (tab === 2) {
       body = t.phrases.map(p => `
         <div class="phrase-item">
           <div><div class="p-en">${esc(p.en)}</div><div class="p-vi">${esc(p.vi)}</div></div>
@@ -990,6 +1031,7 @@ const App = (() => {
     const activeToday = names.filter(u => { const st = loadState(u); return st && st.lastStudy === todayStr(); }).length;
     const nVocab = TOPICS.reduce((n, t) => n + t.vocab.length, 0);
     const nPhrases = TOPICS.reduce((n, t) => n + t.phrases.length, 0);
+    const nChunks = TOPICS.reduce((n, t) => n + (t.chunks || []).length, 0);
 
     main().innerHTML = `
       <div class="view-title">🛠️ Quản trị hệ thống</div>
@@ -1015,8 +1057,9 @@ const App = (() => {
         <div class="content-stats">
           <span>📂 ${TOPICS.length} chủ đề</span>
           <span>📖 ${nVocab} từ vựng</span>
+          <span>🗣️ ${nChunks} cụm giao tiếp</span>
           <span>💬 ${nPhrases} mẫu câu</span>
-          <span>🗣️ ${TOPICS.length} hội thoại</span>
+          <span>🎭 ${TOPICS.length} hội thoại</span>
           <span>🎯 ${PLACEMENT_TEST.length} câu kiểm tra đầu vào</span>
         </div>
         <div class="td-sub" style="margin-top:8px">Muốn thêm chủ đề/từ vựng: mở tệp <b>data.js</b>, thêm theo đúng mẫu có sẵn rồi đăng lại web.</div>
@@ -1189,10 +1232,9 @@ const App = (() => {
       .sort((a, b) => a[1].due < b[1].due ? -1 : 1)
       .slice(0, 20);
     for (const [key] of cards) {
-      const [tid, w] = key.split('|');
-      const t = topicById(tid);
-      const v = t && t.vocab.find(x => x.w === w);
-      if (v) q.push({ title: `📚 ${v.w} ${v.ipa}`, body: `${v.m} — "${v.ex}" · Chạm để luyện 1 phút` });
+      const [tid, ...rest] = key.split('|');
+      const v = findItem(tid, rest.join('|'));
+      if (v) q.push({ title: `📚 ${v.w}${v.ipa ? ' ' + v.ipa : ''}`, body: `${v.m} — "${v.ex}" · Chạm để luyện 1 phút` });
     }
     // 2) mẫu câu của bài đang học — kèm gợi ý dùng ngoài đời
     const cur = currentDayIdx();
