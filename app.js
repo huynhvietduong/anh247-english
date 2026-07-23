@@ -101,22 +101,22 @@ const App = (() => {
     {
       name: 'Sinh tồn', en: 'Survival', icon: '🌱', color: '#2ecc8f',
       goal: 'Chào hỏi, giới thiệu bản thân, hỏi lại khi chưa hiểu và nhờ người khác giúp đỡ.',
-      topics: ['greetings', 'family', 'numbers-time', 'survival-basics', 'polite-requests'],
+      topics: ['greetings', 'family', 'numbers-time', 'making-friends', 'survival-basics', 'polite-requests'],
     },
     {
       name: 'Đời sống hằng ngày', en: 'Daily Life', icon: '🏙️', color: '#4f7cff',
       goal: 'Tự xoay xở khi ăn uống, mua sắm, hỏi đường và nói về thói quen, thời tiết.',
-      topics: ['daily-routine', 'food', 'shopping', 'directions', 'weather'],
+      topics: ['daily-routine', 'food', 'coffee-shop', 'shopping', 'online-order', 'directions', 'weather'],
     },
     {
       name: 'Giao tiếp xã hội', en: 'Social', icon: '💬', color: '#ffc94d',
       goal: 'Trò chuyện về công việc, sở thích, sức khỏe; đặt lịch hẹn; bày tỏ cảm xúc và ý kiến.',
-      topics: ['hobbies', 'work', 'health', 'phone', 'travel', 'feelings', 'reactions', 'opinions'],
+      topics: ['hobbies', 'work', 'describing-people', 'health', 'phone', 'renting', 'travel', 'feelings', 'reactions', 'opinions'],
     },
     {
       name: 'Làm chủ hội thoại', en: 'Fluency', icon: '🚀', color: '#ff6b7a',
       goal: 'Xử lý tình huống phức tạp, giữ nhịp hội thoại tự nhiên và ứng phó khi khẩn cấp.',
-      topics: ['money', 'study', 'sports', 'party', 'technology', 'emergency', 'smalltalk', 'conversation-flow'],
+      topics: ['money', 'study', 'job-interview', 'sports', 'party', 'technology', 'emergency', 'smalltalk', 'conversation-flow'],
     },
   ];
 
@@ -656,7 +656,9 @@ const App = (() => {
 
     let body = '';
     if (tab === 0) {
-      body = ts.map(t => `
+      const cando = ts.map(t => typeof CANDO !== 'undefined' && CANDO[t.id] ? CANDO[t.id] : null).filter(Boolean);
+      const candoHtml = cando.length ? `<div class="cando-banner">✅ <b>Học xong bạn có thể:</b> ${cando.map(esc).join(' · ')}</div>` : '';
+      body = candoHtml + ts.map(t => `
         <h3 style="margin:18px 0 12px">${t.icon} ${t.name} <span style="color:var(--muted);font-weight:400;font-size:13px">· ${t.nameEn}</span></h3>
         <div class="vocab-list">${t.vocab.map(v => `
           <div class="vocab-card">

@@ -1,11 +1,12 @@
 // Service worker: cho phép cài đặt PWA, chạy offline và hiển thị thông báo
-const CACHE = 'englishdaily-v6';
+const CACHE = 'englishdaily-v7';
 const SHELL = [
   './',
   './index.html',
   './style.css',
   './data.js',
   './data2.js',
+  './data3.js',
   './app.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
