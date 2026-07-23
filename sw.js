@@ -1,5 +1,5 @@
 // Service worker: cho phép cài đặt PWA, chạy offline và hiển thị thông báo
-const CACHE = 'englishdaily-v3';
+const CACHE = 'englishdaily-v4';
 const SHELL = [
   './',
   './index.html',
@@ -36,6 +36,19 @@ self.addEventListener('fetch', e => {
       .catch(() => caches.match(e.request, { ignoreSearch: true })
         .then(hit => hit || caches.match('./index.html')))
   );
+});
+
+// Nhận thông báo đẩy từ máy chủ (hoạt động cả khi app/trình duyệt đã đóng)
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data.json(); } catch (err) {}
+  e.waitUntil(self.registration.showNotification(d.title || '📚 EnglishDaily', {
+    body: d.body || 'Đến giờ học tiếng Anh rồi!',
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag: 'englishdaily-push',
+    data: { url: d.url || './index.html' },
+  }));
 });
 
 // Bấm vào thông báo → mở app

@@ -8,6 +8,8 @@ const USERS_KEY = 'englishdaily_users';        // danh sách tài khoản trên 
 const SESSION_KEY = 'englishdaily_session';    // ai đang đăng nhập
 const STATE_PREFIX = 'englishdaily_state:';    // tiến độ học của từng tài khoản
 const SRS_INTERVALS = [0, 1, 3, 7, 16]; // ngày chờ giữa các lần ôn theo hộp Leitner
+const PUSH_API = '/api/push';           // backend đẩy thông báo trên VPS (nginx proxy → 127.0.0.1:5003)
+const VAPID_PUBLIC = 'BBdmFi_CDVK3hK3pI_hp9bbJNq6f7xitjMQ86CHpf8N9zP4f1ckE6we8rJIGX1ghRGNdxGecWTANpqEJqajNw1g';
 
 const App = (() => {
 
@@ -50,6 +52,8 @@ const App = (() => {
         const s = JSON.parse(raw);
         if (!s.reminder) s.reminder = { enabled: false, time: '20:00' };
         if (!('lastNotified' in s)) s.lastNotified = null;
+        if (!s.push) s.push = { enabled: false, times: ['07:00', '12:30', '20:00'] };
+        if (!s.missions) s.missions = {};
         return s;
       }
     } catch (e) {}
@@ -69,6 +73,8 @@ const App = (() => {
       quizStats: { total: 0, correct: 0 },
       reminder: { enabled: false, time: '20:00' },
       lastNotified: null,
+      push: { enabled: false, times: ['07:00', '12:30', '20:00'] },
+      missions: {},               // { 'YYYY-MM-DD': true } — thử thách đời thực đã làm
     };
   }
 
@@ -200,6 +206,11 @@ const App = (() => {
     const chip = document.getElementById('user-chip');
     if (chip) chip.innerHTML = `👤 <b>${esc(CURRENT)}</b>${isAdmin() ? ' <span class="role-badge">admin</span>' : ''}`;
     go(isAdmin() ? 'admin' : 'dashboard');
+    syncPush();                                  // làm mới nội dung thông báo theo tiến độ mới nhất
+    if ('setAppBadge' in navigator) {            // huy hiệu số thẻ đến hạn trên icon app
+      const n = dueCards().length;
+      (n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+    }
   }
 
   // ---------- Onboarding ----------
@@ -393,10 +404,22 @@ const App = (() => {
       </div>`;
     }
 
+    const missionDone = !!S.missions[todayStr()];
     main().innerHTML = `
       <div class="view-title">Xin chào, ${esc(S.name)}! 👋</div>
       <div class="view-sub">Trình độ: <b>${lvNames[S.level]}</b> · Mục tiêu: giao tiếp tiếng Anh hằng ngày</div>
       ${todayHtml}
+      <div class="panel mission-card ${missionDone ? 'done' : ''}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <h3 style="margin-bottom:6px">🎯 Thử thách đời thực hôm nay</h3>
+            <div style="font-size:14.5px;line-height:1.6">${esc(todayMission())}</div>
+          </div>
+          ${missionDone
+            ? '<span class="score-badge score-good">✓ Đã thực hiện</span>'
+            : '<button class="btn btn-green" onclick="App.doneMission()">Tôi đã làm ✓</button>'}
+        </div>
+      </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="ico">🔥</div><div class="num">${S.streak}</div><div class="lbl">Chuỗi ngày học liên tiếp</div></div>
         <div class="stat-card"><div class="ico">📖</div><div class="num">${S.done.length}/${S.plan.length}</div><div class="lbl">Ngày đã hoàn thành</div></div>
@@ -417,8 +440,20 @@ const App = (() => {
         <h3>⚙️ Cài đặt</h3>
         <div class="set-row">
           <div>
-            <div class="set-name">🔔 Nhắc học hằng ngày</div>
-            <div class="set-desc">Gửi thông báo nhắc bạn học nếu hôm đó chưa học.</div>
+            <div class="set-name">📣 Bài học tự đến qua thông báo</div>
+            <div class="set-desc">Máy chủ gửi từ vựng &amp; mẫu câu của bạn theo 3 khung giờ — <b>app đóng vẫn nhận được</b>.</div>
+          </div>
+          <div class="set-ctrl" style="flex-wrap:wrap">
+            <input type="time" value="${S.push.times[0]}" onchange="App.setPushTime(0,this.value)">
+            <input type="time" value="${S.push.times[1]}" onchange="App.setPushTime(1,this.value)">
+            <input type="time" value="${S.push.times[2]}" onchange="App.setPushTime(2,this.value)">
+            <button class="btn btn-sm ${S.push.enabled ? 'btn-green' : 'btn-outline'}" onclick="App.togglePush()">${S.push.enabled ? '✓ Đang bật' : 'Bật'}</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <div>
+            <div class="set-name">🔔 Nhắc học khi đang mở app</div>
+            <div class="set-desc">Nhắc nhẹ nếu đến giờ mà hôm nay bạn chưa học (chạy trong app).</div>
           </div>
           <div class="set-ctrl">
             <input type="time" id="remind-time" value="${S.reminder.time}" onchange="App.setReminderTime(this.value)">
@@ -1138,6 +1173,154 @@ const App = (() => {
     }
   }
 
+  // ---------- Thông báo đẩy chủ động (máy chủ gửi bài học, app đóng vẫn nhận) ----------
+  function vapidKey() {
+    const pad = '='.repeat((4 - VAPID_PUBLIC.length % 4) % 4);
+    const b64 = (VAPID_PUBLIC + pad).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(b64);
+    return Uint8Array.from([...raw].map(ch => ch.charCodeAt(0)));
+  }
+
+  // Hàng đợi nội dung cá nhân hóa: mỗi thông báo là một bài học tí hon
+  function buildPushQueue() {
+    const q = [];
+    // 1) từ vựng đến hạn ôn (ưu tiên từ sắp quên nhất)
+    const cards = Object.entries(S.srs)
+      .sort((a, b) => a[1].due < b[1].due ? -1 : 1)
+      .slice(0, 20);
+    for (const [key] of cards) {
+      const [tid, w] = key.split('|');
+      const t = topicById(tid);
+      const v = t && t.vocab.find(x => x.w === w);
+      if (v) q.push({ title: `📚 ${v.w} ${v.ipa}`, body: `${v.m} — "${v.ex}" · Chạm để luyện 1 phút` });
+    }
+    // 2) mẫu câu của bài đang học — kèm gợi ý dùng ngoài đời
+    const cur = currentDayIdx();
+    const d = cur !== -1 ? S.plan[cur] : null;
+    const tids = d && d.t === 'lesson' ? d.topics : learnedTopicIds().slice(-2);
+    for (const tid of tids) {
+      const t = topicById(tid);
+      if (t) t.phrases.forEach(p => q.push({ title: `💬 ${p.en}`, body: `${p.vi} · Thử dùng câu này hôm nay nhé!` }));
+    }
+    // xen kẽ từ vựng / mẫu câu cho đỡ nhàm
+    const words = q.filter(x => x.title.startsWith('📚')), phrases = q.filter(x => x.title.startsWith('💬'));
+    const mix = [];
+    for (let i = 0; i < Math.max(words.length, phrases.length) && mix.length < 30; i++) {
+      if (words[i]) mix.push(words[i]);
+      if (phrases[i] && mix.length < 30) mix.push(phrases[i]);
+    }
+    return mix;
+  }
+
+  async function togglePush() {
+    if (S.push.enabled) {
+      S.push.enabled = false;
+      save();
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          fetch(PUSH_API + '/unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {});
+          await sub.unsubscribe();
+        }
+      } catch (e) {}
+      renderDashboard();
+      return;
+    }
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      toast('⚠️ Trình duyệt chưa hỗ trợ thông báo đẩy. iPhone: cần cài app vào màn hình chính trước.');
+      return;
+    }
+    let perm = Notification.permission;
+    if (perm === 'default') perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('⚠️ Bạn cần cho phép thông báo trong cài đặt trình duyệt'); return; }
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidKey() });
+      const r = await fetch(PUSH_API + '/subscribe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sub: sub.toJSON(), user: CURRENT, times: S.push.times, tzoff: new Date().getTimezoneOffset(), queue: buildPushQueue() }),
+      });
+      if (!r.ok) throw new Error('subscribe failed');
+      S.push.enabled = true;
+      save();
+      toast('📣 Đã bật! Bài học sẽ tự đến với bạn ' + S.push.times.length + ' lần mỗi ngày');
+      renderDashboard();
+    } catch (e) {
+      toast('⚠️ Không đăng ký được — kiểm tra kết nối mạng rồi thử lại');
+    }
+  }
+
+  function setPushTime(i, v) {
+    if (v) S.push.times[i] = v;
+    save();
+    if (S.push.enabled) syncPush();
+  }
+
+  // Đồng bộ lại hàng đợi mỗi lần mở app — nội dung thông báo luôn bám tiến độ mới nhất
+  async function syncPush() {
+    if (!S || !S.push || !S.push.enabled) return;
+    if (!('serviceWorker' in navigator) || !('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (!sub) return;
+      fetch(PUSH_API + '/subscribe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sub: sub.toJSON(), user: CURRENT, times: S.push.times, tzoff: new Date().getTimezoneOffset(), queue: buildPushQueue() }),
+      }).catch(() => {});
+    } catch (e) {}
+  }
+
+  // ---------- Thử thách đời thực (gắn bài học vào cuộc sống hằng ngày) ----------
+  const MISSIONS = {
+    greetings: 'Hôm nay gặp ai, hãy thầm chào trong đầu bằng tiếng Anh: “Hello! How are you?”',
+    family: 'Nhìn một tấm ảnh gia đình và giới thiệu từng người bằng tiếng Anh: “This is my mother…”',
+    'numbers-time': 'Mỗi lần xem giờ hôm nay, đọc thầm giờ đó bằng tiếng Anh.',
+    'daily-routine': 'Vừa làm một việc nhà vừa mô tả nó bằng tiếng Anh: “I am cooking dinner.”',
+    food: 'Đến bữa ăn, gọi tên các món trên bàn bằng tiếng Anh.',
+    shopping: 'Khi mua đồ (hoặc lướt shop online), thầm hỏi giá: “How much is it?”',
+    directions: 'Trên đường đi hôm nay, thầm dẫn đường cho chính mình: “Turn left… go straight…”',
+    weather: 'Nhìn bầu trời và nói thời tiết hôm nay bằng tiếng Anh, thêm cả nhiệt độ.',
+    hobbies: 'Dành 1 phút kể với chính mình về sở thích của bạn bằng tiếng Anh.',
+    work: 'Mô tả 3 việc bạn đã làm hôm nay ở trường/cơ quan bằng tiếng Anh.',
+    health: 'Tự hỏi “How do I feel today?” và trả lời bằng 2 câu tiếng Anh.',
+    phone: 'Trước cuộc gọi tiếp theo, tập nói 3 lần: “Hello, may I speak to…?”',
+    travel: 'Tưởng tượng đặt phòng cho chuyến đi mơ ước — nói 3 câu đặt phòng bằng tiếng Anh.',
+    feelings: 'Cuối ngày, gọi tên cảm xúc hôm nay bằng 3 tính từ tiếng Anh.',
+    money: 'Khi thanh toán/chuyển khoản hôm nay, đọc thầm số tiền bằng tiếng Anh.',
+    study: 'Dạy lại 3 từ mới hôm nay cho một người thân (hoặc thú bông 🧸) bằng tiếng Anh.',
+    sports: 'Lúc vận động hôm nay, đếm nhịp bằng tiếng Anh: one, two, three…',
+    party: 'Tập nói lời chúc mừng sinh nhật bằng tiếng Anh trước gương 2 lần.',
+    technology: 'Đổi ngôn ngữ điện thoại sang tiếng Anh trong 1 giờ — bạn sẽ bất ngờ đấy!',
+    emergency: 'Đọc to 2 lần: “Help! Please call an ambulance!” — câu có thể cứu bạn khi du lịch.',
+    smalltalk: 'Khi gặp người quen, thầm mở chuyện trong đầu: “Long time no see! How have you been?”',
+  };
+  const MISSIONS_GENERIC = [
+    'Nghe 1 bài hát tiếng Anh và ghi lại 3 từ bạn nghe được.',
+    'Đọc to 5 từ trong bộ flashcard của bạn trước gương.',
+    'Xem 1 video tiếng Anh ngắn (có phụ đề) về chủ đề bạn thích.',
+    'Đặt tên tiếng Anh cho 5 đồ vật quanh bạn ngay bây giờ.',
+    'Viết 1 câu tiếng Anh mô tả ngày hôm nay của bạn.',
+  ];
+
+  function todayMission() {
+    const cur = currentDayIdx();
+    const d = cur !== -1 ? S.plan[cur] : null;
+    if (d && d.t === 'lesson' && MISSIONS[d.topics[0]]) return MISSIONS[d.topics[0]];
+    const seed = todayStr().split('-').reduce((a, x) => a + parseInt(x, 10), 0);
+    return MISSIONS_GENERIC[seed % MISSIONS_GENERIC.length];
+  }
+
+  function doneMission() {
+    S.missions[todayStr()] = true;
+    touchStreak();
+    save();
+    toast('🎯 Tuyệt! Tiếng Anh vừa bước vào đời thực của bạn');
+    renderDashboard();
+  }
+
   // Khóa zoom: iOS Safari bỏ qua user-scalable=no nên chặn thêm cử chỉ véo 2 ngón.
   // Double-tap zoom đã bị vô hiệu bằng CSS touch-action:manipulation (không phá thao tác bấm nhanh).
   function lockZoom() {
@@ -1178,5 +1361,6 @@ const App = (() => {
     openTopic, freeTab: renderFreeTopic, resetAll,
     installApp, toggleReminder, setReminderTime,
     authTab, authSubmit, logout, adminSetPass, adminResetUser, adminDeleteUser, togglePass,
+    togglePush, setPushTime, doneMission,
   };
 })();
