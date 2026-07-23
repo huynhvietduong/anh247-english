@@ -3,20 +3,51 @@
 // Tự động: xếp trình độ → tạo lộ trình → nạp bài học → theo dõi tiến độ
 // ============================================================
 
-const STORE_KEY = 'englishdaily_v1';
+const LEGACY_KEY = 'englishdaily_v1';          // dữ liệu bản cũ (một người dùng)
+const USERS_KEY = 'englishdaily_users';        // danh sách tài khoản trên thiết bị này
+const SESSION_KEY = 'englishdaily_session';    // ai đang đăng nhập
+const STATE_PREFIX = 'englishdaily_state:';    // tiến độ học của từng tài khoản
 const SRS_INTERVALS = [0, 1, 3, 7, 16]; // ngày chờ giữa các lần ôn theo hộp Leitner
 
 const App = (() => {
 
-  // ---------- Trạng thái ----------
-  let S = load();
+  // ---------- Tài khoản ----------
+  let USERS = loadUsers();
+  let CURRENT = localStorage.getItem(SESSION_KEY);
+  let S = null;
 
-  function load() {
+  function loadUsers() {
+    try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; } catch (e) { return {}; }
+  }
+  function saveUsers() { localStorage.setItem(USERS_KEY, JSON.stringify(USERS)); }
+
+  // Băm mật khẩu (che giấu cơ bản — app tĩnh không có máy chủ nên không phải bảo mật tuyệt đối)
+  function hashPass(p) {
+    const s = 'ed_salt::' + p;
+    let h1 = 5381, h2 = 52711;
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      h1 = (h1 * 33 + c) >>> 0;
+      h2 = (h2 * 31 + c) >>> 0;
+    }
+    return h1.toString(16) + '.' + h2.toString(16);
+  }
+
+  // Tạo sẵn tài khoản quản trị lần đầu chạy
+  function ensureAdmin() {
+    if (!USERS['admin']) {
+      USERS['admin'] = { pass: hashPass('admin123'), role: 'admin', created: todayStr() };
+      saveUsers();
+    }
+  }
+
+  const stateKey = u => STATE_PREFIX + u;
+
+  function loadState(username) {
     try {
-      const raw = localStorage.getItem(STORE_KEY);
+      const raw = localStorage.getItem(stateKey(username));
       if (raw) {
         const s = JSON.parse(raw);
-        // nâng cấp dữ liệu cũ (chưa có phần nhắc học)
         if (!s.reminder) s.reminder = { enabled: false, time: '20:00' };
         if (!('lastNotified' in s)) s.lastNotified = null;
         return s;
@@ -24,7 +55,7 @@ const App = (() => {
     } catch (e) {}
     return null;
   }
-  function save() { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
+  function save() { if (CURRENT) localStorage.setItem(stateKey(CURRENT), JSON.stringify(S)); }
 
   function freshState(name, level) {
     return {
@@ -78,6 +109,88 @@ const App = (() => {
       plan.splice(plan.length - 2, 0, { t: 'review' });
     }
     return plan;
+  }
+
+  // ---------- Đăng nhập / Đăng ký ----------
+  let authMode = 'login';
+
+  function showScreen(id) {
+    ['screen-login', 'screen-onboard', 'app'].forEach(x =>
+      document.getElementById(x).classList.toggle('hidden', x !== id));
+  }
+
+  function authTab(mode) {
+    authMode = mode;
+    document.getElementById('authtab-login').classList.toggle('active', mode === 'login');
+    document.getElementById('authtab-reg').classList.toggle('active', mode === 'reg');
+    document.getElementById('auth-pass2').classList.toggle('hidden', mode === 'login');
+    document.getElementById('auth-title').textContent = mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản mới';
+    document.getElementById('auth-sub').textContent = mode === 'login'
+      ? 'Đăng nhập để tiếp tục lộ trình học của bạn.'
+      : 'Mỗi tài khoản có lộ trình và tiến độ học riêng.';
+    document.getElementById('auth-submit').textContent = mode === 'login' ? 'Đăng nhập' : 'Đăng ký & bắt đầu';
+    authErr('');
+  }
+
+  function authErr(msg) { document.getElementById('auth-err').textContent = msg; }
+
+  function authSubmit() {
+    const u = document.getElementById('auth-user').value.trim().toLowerCase();
+    const p = document.getElementById('auth-pass').value;
+    if (!u || !p) return authErr('Vui lòng nhập đủ tên đăng nhập và mật khẩu.');
+
+    if (authMode === 'reg') {
+      const p2 = document.getElementById('auth-pass2').value;
+      if (!/^[a-z0-9_.-]{3,24}$/.test(u)) return authErr('Tên đăng nhập: 3–24 ký tự, chỉ gồm chữ thường, số, dấu . _ -');
+      if (USERS[u]) return authErr('Tên đăng nhập này đã tồn tại.');
+      if (p.length < 4) return authErr('Mật khẩu cần ít nhất 4 ký tự.');
+      if (p !== p2) return authErr('Mật khẩu nhập lại không khớp.');
+      USERS[u] = { pass: hashPass(p), role: 'student', created: todayStr() };
+      saveUsers();
+      // chuyển tiến độ của bản cũ (trước khi có tài khoản) sang người đăng ký đầu tiên
+      const legacy = localStorage.getItem(LEGACY_KEY);
+      if (legacy && !localStorage.getItem(stateKey(u))) {
+        localStorage.setItem(stateKey(u), legacy);
+        localStorage.removeItem(LEGACY_KEY);
+      }
+    } else {
+      if (!USERS[u]) return authErr('Tài khoản không tồn tại. Bấm "Đăng ký" để tạo mới.');
+      if (USERS[u].pass !== hashPass(p)) return authErr('Sai mật khẩu, thử lại nhé.');
+    }
+
+    CURRENT = u;
+    localStorage.setItem(SESSION_KEY, u);
+    document.getElementById('auth-pass').value = '';
+    document.getElementById('auth-pass2').value = '';
+    enterApp();
+  }
+
+  function logout() {
+    localStorage.removeItem(SESSION_KEY);
+    location.reload();
+  }
+
+  function isAdmin() { return CURRENT && USERS[CURRENT] && USERS[CURRENT].role === 'admin'; }
+
+  function enterApp() {
+    S = loadState(CURRENT);
+    // Admin: không cần kiểm tra đầu vào — tạo sẵn hồ sơ học để mọi màn hình hoạt động
+    if (!S && isAdmin()) {
+      S = freshState(CURRENT, 1);
+      save();
+    }
+    if (!S || !S.plan) {
+      // học viên mới → làm kiểm tra đầu vào
+      showScreen('screen-onboard');
+      const inp = document.getElementById('inp-name');
+      if (inp && !inp.value) inp.value = CURRENT;
+      return;
+    }
+    showScreen('app');
+    document.getElementById('nav-admin').classList.toggle('hidden', !isAdmin());
+    const chip = document.getElementById('user-chip');
+    if (chip) chip.innerHTML = `👤 <b>${esc(CURRENT)}</b>${isAdmin() ? ' <span class="role-badge">admin</span>' : ''}`;
+    go(isAdmin() ? 'admin' : 'dashboard');
   }
 
   // ---------- Onboarding ----------
@@ -145,8 +258,10 @@ const App = (() => {
   }
 
   function finishOnboard() {
-    document.getElementById('screen-onboard').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
+    showScreen('app');
+    document.getElementById('nav-admin').classList.toggle('hidden', !isAdmin());
+    const chip = document.getElementById('user-chip');
+    if (chip) chip.innerHTML = `👤 <b>${esc(CURRENT)}</b>${isAdmin() ? ' <span class="role-badge">admin</span>' : ''}`;
     go('dashboard');
   }
 
@@ -161,6 +276,7 @@ const App = (() => {
     else if (view === 'flashcards') renderFlashcards();
     else if (view === 'speaking') renderSpeaking();
     else if (view === 'topics') renderTopics();
+    else if (view === 'admin') renderAdmin();
     else if (view === 'day') renderDay(arg);
     window.scrollTo(0, 0);
   }
@@ -313,6 +429,13 @@ const App = (() => {
             <div class="set-desc">Xóa tiến độ và làm lại kiểm tra đầu vào.</div>
           </div>
           <div class="set-ctrl"><button class="btn btn-sm btn-outline" onclick="App.resetAll()">Đặt lại</button></div>
+        </div>
+        <div class="set-row only-mobile">
+          <div>
+            <div class="set-name">👤 Tài khoản: ${esc(CURRENT || '')}</div>
+            <div class="set-desc">Đăng xuất để đổi người học trên thiết bị này.</div>
+          </div>
+          <div class="set-ctrl"><button class="btn btn-sm btn-outline" onclick="App.logout()">Đăng xuất</button></div>
         </div>
       </div>
     `;
@@ -789,6 +912,113 @@ const App = (() => {
       ${body}`;
   }
 
+  // ---------- Giao diện quản trị (admin) ----------
+  function renderAdmin() {
+    if (!isAdmin()) { go('dashboard'); return; }
+    const names = Object.keys(USERS);
+    const rows = names.map(u => {
+      const st = loadState(u);
+      const role = USERS[u].role;
+      const prog = st && st.plan ? `${st.done.length}/${st.plan.length}` : '—';
+      const pct = st && st.plan ? Math.round(st.done.length / st.plan.length * 100) : 0;
+      const words = st ? Object.keys(st.srs).length : 0;
+      const acc = st && st.quizStats.total ? Math.round(st.quizStats.correct / st.quizStats.total * 100) + '%' : '—';
+      const lvName = st ? ({ 1: 'Cơ bản', 2: 'Sơ trung', 3: 'Trung cấp' })[st.level] : '—';
+      return `<tr>
+        <td><b>${esc(u)}</b>${role === 'admin' ? ' <span class="role-badge">admin</span>' : ''}<div class="td-sub">tạo: ${USERS[u].created || '—'}</div></td>
+        <td>${lvName}</td>
+        <td>${prog}<div class="mini-bar"><div style="width:${pct}%"></div></div></td>
+        <td>${words}</td>
+        <td>${st ? '🔥 ' + st.streak : '—'}</td>
+        <td>${acc}</td>
+        <td>${st && st.lastStudy ? st.lastStudy : 'chưa học'}</td>
+        <td class="td-actions">
+          <button class="btn btn-sm btn-outline" onclick="App.adminSetPass('${esc(u)}')" title="Đặt lại mật khẩu">🔑</button>
+          <button class="btn btn-sm btn-outline" onclick="App.adminResetUser('${esc(u)}')" title="Xóa tiến độ học">↺</button>
+          ${u !== CURRENT ? `<button class="btn btn-sm btn-outline btn-danger" onclick="App.adminDeleteUser('${esc(u)}')" title="Xóa tài khoản">🗑️</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('');
+
+    const students = names.filter(u => USERS[u].role !== 'admin');
+    const totalDays = names.reduce((n, u) => { const st = loadState(u); return n + (st ? st.done.length : 0); }, 0);
+    const totalWords = names.reduce((n, u) => { const st = loadState(u); return n + (st ? Object.keys(st.srs).length : 0); }, 0);
+    const activeToday = names.filter(u => { const st = loadState(u); return st && st.lastStudy === todayStr(); }).length;
+    const nVocab = TOPICS.reduce((n, t) => n + t.vocab.length, 0);
+    const nPhrases = TOPICS.reduce((n, t) => n + t.phrases.length, 0);
+
+    main().innerHTML = `
+      <div class="view-title">🛠️ Quản trị hệ thống</div>
+      <div class="view-sub">Quản lý các tài khoản đã đăng ký trên thiết bị này.</div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="ico">👥</div><div class="num">${students.length}</div><div class="lbl">Học viên</div></div>
+        <div class="stat-card"><div class="ico">✅</div><div class="num">${totalDays}</div><div class="lbl">Tổng ngày đã hoàn thành</div></div>
+        <div class="stat-card"><div class="ico">🧠</div><div class="num">${totalWords}</div><div class="lbl">Tổng từ đang ghi nhớ</div></div>
+        <div class="stat-card"><div class="ico">📅</div><div class="num">${activeToday}</div><div class="lbl">Đã học hôm nay</div></div>
+      </div>
+      <div class="panel">
+        <h3>👥 Danh sách tài khoản</h3>
+        <div class="table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>Tài khoản</th><th>Trình độ</th><th>Tiến độ</th><th>Từ vựng</th><th>Streak</th><th>Quiz</th><th>Học gần nhất</th><th>Thao tác</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="td-sub" style="margin-top:10px">🔑 đặt lại mật khẩu · ↺ xóa tiến độ học · 🗑️ xóa tài khoản</div>
+      </div>
+      <div class="panel">
+        <h3>📚 Nội dung học (nạp tự động từ data.js)</h3>
+        <div class="content-stats">
+          <span>📂 ${TOPICS.length} chủ đề</span>
+          <span>📖 ${nVocab} từ vựng</span>
+          <span>💬 ${nPhrases} mẫu câu</span>
+          <span>🗣️ ${TOPICS.length} hội thoại</span>
+          <span>🎯 ${PLACEMENT_TEST.length} câu kiểm tra đầu vào</span>
+        </div>
+        <div class="td-sub" style="margin-top:8px">Muốn thêm chủ đề/từ vựng: mở tệp <b>data.js</b>, thêm theo đúng mẫu có sẵn rồi đăng lại web.</div>
+      </div>
+      <div class="panel">
+        <h3>🔐 Bảo mật</h3>
+        <div class="set-row">
+          <div>
+            <div class="set-name">Đổi mật khẩu admin</div>
+            <div class="set-desc">Tài khoản mặc định là admin / admin123 — nên đổi ngay lần đầu dùng.</div>
+          </div>
+          <div class="set-ctrl"><button class="btn btn-sm btn-outline" onclick="App.adminSetPass('${esc(CURRENT)}')">Đổi mật khẩu</button></div>
+        </div>
+        <div class="td-sub">Lưu ý: đây là web tĩnh không có máy chủ — tài khoản chỉ lưu trên trình duyệt của từng thiết bị, dùng để phân hồ sơ học và ngăn người dùng thường vào trang quản trị, không phải bảo mật tuyệt đối.</div>
+      </div>`;
+  }
+
+  function adminSetPass(u) {
+    if (!isAdmin() || !USERS[u]) return;
+    const p = prompt(`Nhập mật khẩu mới cho tài khoản "${u}" (tối thiểu 4 ký tự):`);
+    if (p === null) return;
+    if (p.length < 4) { toast('⚠️ Mật khẩu cần ít nhất 4 ký tự'); return; }
+    USERS[u].pass = hashPass(p);
+    saveUsers();
+    toast(`🔑 Đã đổi mật khẩu cho "${u}"`);
+  }
+
+  function adminResetUser(u) {
+    if (!isAdmin() || !USERS[u]) return;
+    if (!confirm(`Xóa toàn bộ tiến độ học của "${u}"? (tài khoản vẫn giữ nguyên)`)) return;
+    localStorage.removeItem(stateKey(u));
+    if (u === CURRENT) S = null;
+    toast(`↺ Đã xóa tiến độ của "${u}"`);
+    renderAdmin();
+  }
+
+  function adminDeleteUser(u) {
+    if (!isAdmin() || !USERS[u] || u === CURRENT) return;
+    if (!confirm(`Xóa hẳn tài khoản "${u}" cùng toàn bộ tiến độ học?`)) return;
+    delete USERS[u];
+    saveUsers();
+    localStorage.removeItem(stateKey(u));
+    toast(`🗑️ Đã xóa tài khoản "${u}"`);
+    renderAdmin();
+  }
+
   // ---------- Tiện ích ----------
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function js(s) { return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, ' '); }
@@ -803,8 +1033,8 @@ const App = (() => {
   }
 
   function resetAll() {
-    if (!confirm('Xóa toàn bộ tiến độ và làm lại kiểm tra đầu vào?')) return;
-    localStorage.removeItem(STORE_KEY);
+    if (!confirm(`Xóa toàn bộ tiến độ học của tài khoản "${CURRENT}" và làm lại kiểm tra đầu vào?`)) return;
+    if (CURRENT) localStorage.removeItem(stateKey(CURRENT));
     location.reload();
   }
 
@@ -904,10 +1134,18 @@ const App = (() => {
     // nạp sẵn giọng đọc
     if ('speechSynthesis' in window) speechSynthesis.getVoices();
     setupPwa();
-    if (S && S.plan) {
-      document.getElementById('screen-onboard').classList.add('hidden');
-      document.getElementById('app').classList.remove('hidden');
-      go('dashboard');
+    ensureAdmin();
+    ['auth-user', 'auth-pass', 'auth-pass2'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') authSubmit(); });
+    });
+    if (CURRENT && USERS[CURRENT]) {
+      enterApp();
+    } else {
+      CURRENT = null;
+      localStorage.removeItem(SESSION_KEY);
+      showScreen('screen-login');
+      document.getElementById('auth-user').focus();
     }
     checkReminder();
     setInterval(checkReminder, 60 * 1000);
@@ -919,5 +1157,6 @@ const App = (() => {
     answerQuiz, flipCard, gradeCard, toggleRecord, nextPhrase, skipSpeakScore,
     openTopic, freeTab: renderFreeTopic, resetAll,
     installApp, toggleReminder, setReminderTime,
+    authTab, authSubmit, logout, adminSetPass, adminResetUser, adminDeleteUser,
   };
 })();

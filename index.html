@@ -16,6 +16,24 @@
 </head>
 <body>
 
+<!-- ===== MÀN HÌNH ĐĂNG NHẬP / ĐĂNG KÝ ===== -->
+<div id="screen-login" class="screen hidden">
+  <div class="onboard-box">
+    <div class="logo-big">🇬🇧 EnglishDaily</div>
+    <h1 id="auth-title">Đăng nhập</h1>
+    <p class="sub" id="auth-sub">Đăng nhập để tiếp tục lộ trình học của bạn.</p>
+    <div class="auth-tabs">
+      <button class="tab active" id="authtab-login" onclick="App.authTab('login')">Đăng nhập</button>
+      <button class="tab" id="authtab-reg" onclick="App.authTab('reg')">Đăng ký</button>
+    </div>
+    <input id="auth-user" type="text" class="auth-inp" placeholder="Tên đăng nhập" maxlength="24" autocomplete="username">
+    <input id="auth-pass" type="password" class="auth-inp" placeholder="Mật khẩu" maxlength="50">
+    <input id="auth-pass2" type="password" class="auth-inp hidden" placeholder="Nhập lại mật khẩu" maxlength="50">
+    <div id="auth-err" class="auth-err"></div>
+    <button class="btn btn-primary btn-lg" id="auth-submit" onclick="App.authSubmit()">Đăng nhập</button>
+  </div>
+</div>
+
 <!-- ===== MÀN HÌNH CHÀO / KIỂM TRA ĐẦU VÀO ===== -->
 <div id="screen-onboard" class="screen">
   <div class="onboard-box">
@@ -52,10 +70,13 @@
       <button class="nav-item" data-view="flashcards" onclick="App.go('flashcards')">🃏 <span>Flashcard</span></button>
       <button class="nav-item" data-view="speaking" onclick="App.go('speaking')">🎤 <span>Luyện nói</span></button>
       <button class="nav-item" data-view="topics" onclick="App.go('topics')">📚 <span>Chủ đề</span></button>
+      <button class="nav-item hidden" data-view="admin" id="nav-admin" onclick="App.go('admin')">🛠️ <span>Quản trị</span></button>
     </nav>
     <div class="sidebar-foot">
+      <div class="user-chip" id="user-chip"></div>
       <button class="nav-item hidden" id="btn-install" onclick="App.installApp()">📲 <span>Cài đặt app</span></button>
       <button class="nav-item" onclick="App.resetAll()">🔄 <span>Làm lại từ đầu</span></button>
+      <button class="nav-item" onclick="App.logout()">🚪 <span>Đăng xuất</span></button>
     </div>
   </aside>
 

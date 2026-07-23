@@ -244,6 +244,45 @@ main{flex:1;padding:34px 42px;max-width:1060px}
 
 .empty-note{color:var(--muted);text-align:center;padding:40px 0;line-height:1.7}
 
+/* ===== Đăng nhập / Đăng ký ===== */
+#screen-login{
+  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+  background:radial-gradient(1200px 600px at 70% -10%,#1d2a4d 0%,var(--bg) 60%);
+}
+.auth-tabs{display:flex;gap:8px;justify-content:center;margin-bottom:20px}
+.auth-inp{
+  width:100%;padding:13px 16px;border-radius:12px;border:1px solid var(--border);
+  background:var(--panel2);color:var(--text);font-size:15px;margin-bottom:12px;outline:none;
+}
+.auth-inp:focus{border-color:var(--primary)}
+.auth-err{color:var(--red);font-size:13.5px;min-height:20px;margin-bottom:10px}
+.user-chip{
+  padding:10px 14px;font-size:13px;color:var(--muted);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.user-chip b{color:var(--text)}
+.role-badge{
+  display:inline-block;font-size:10px;font-weight:800;padding:2px 8px;border-radius:99px;
+  background:rgba(255,201,77,.15);color:var(--yellow);text-transform:uppercase;letter-spacing:.5px;
+}
+
+/* ===== Bảng quản trị ===== */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.admin-table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+.admin-table th{
+  text-align:left;color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;
+  padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;
+}
+.admin-table td{padding:10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.admin-table tr:last-child td{border-bottom:none}
+.td-sub{color:var(--muted);font-size:11.5px;margin-top:2px}
+.td-actions{white-space:nowrap;display:flex;gap:6px}
+.btn-danger{border-color:rgba(255,107,122,.4);color:var(--red)}
+.btn-danger:hover{border-color:var(--red)}
+.mini-bar{height:5px;background:var(--panel2);border-radius:99px;overflow:hidden;margin-top:5px;min-width:70px}
+.mini-bar div{height:100%;background:linear-gradient(90deg,var(--green),#5eead4);border-radius:99px}
+.content-stats{display:flex;gap:16px;flex-wrap:wrap;font-size:14px;font-weight:600}
+
 /* ===== Cài đặt (panel) ===== */
 .set-row{
   display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
