@@ -1138,11 +1138,22 @@ const App = (() => {
     }
   }
 
+  // Khóa zoom: iOS Safari bỏ qua user-scalable=no nên chặn thêm cử chỉ véo 2 ngón.
+  // Double-tap zoom đã bị vô hiệu bằng CSS touch-action:manipulation (không phá thao tác bấm nhanh).
+  function lockZoom() {
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(ev =>
+      document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
+    document.addEventListener('touchmove', e => {
+      if (e.touches.length > 1) e.preventDefault(); // véo 2 ngón
+    }, { passive: false });
+  }
+
   // ---------- Khởi động ----------
   function init() {
     // nạp sẵn giọng đọc
     if ('speechSynthesis' in window) speechSynthesis.getVoices();
     setupPwa();
+    lockZoom();
     ensureAdmin();
     ['auth-user', 'auth-pass', 'auth-pass2'].forEach(id => {
       const el = document.getElementById(id);

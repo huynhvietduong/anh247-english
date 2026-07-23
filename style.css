@@ -13,10 +13,12 @@
   --radius:14px;
 }
 *{margin:0;padding:0;box-sizing:border-box}
+html{touch-action:manipulation} /* chặn double-tap zoom, giữ vuốt/chạm bình thường */
 body{
   font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
   background:var(--bg);color:var(--text);
   min-height:100vh;
+  touch-action:manipulation;
 }
 .hidden{display:none!important}
 button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
@@ -352,6 +354,11 @@ input[type="time"]:focus{border-color:var(--primary)}
   .btn{padding:12px 18px}
   .lesson-head{flex-wrap:wrap;gap:8px}
   .lesson-head .view-title{font-size:18px}
+}
+
+/* Mobile: ô nhập chữ phải ≥16px — iOS tự phóng to trang khi focus vào input chữ nhỏ hơn */
+@media (max-width:760px){
+  input[type="text"],input[type="password"],input[type="time"],.auth-inp,#inp-name{font-size:16px}
 }
 
 /* Màn hình rất nhỏ */
