@@ -156,6 +156,7 @@ const App = (() => {
     if (!s.weak) s.weak = {};                 // { "tid|w": số lần sai } — điểm yếu cần ôn thêm
     if (!s.mistakes) s.mistakes = {};         // { "tid|w": [đáp án sai đã gõ] } — dùng làm nhiễu
     if (!s.newToday) s.newToday = { d: '', n: 0 };
+    if (!s.startView) s.startView = 'dashboard';   // màn hình hiện ra khi mở app
     if (!('minutesPerDay' in s)) s.minutesPerDay = 15;
     if (!('updatedAt' in s)) s.updatedAt = 0;
     // Nâng cấp thẻ SRS bản cũ {box, due:'YYYY-MM-DD'} → lịch theo phút có easiness
@@ -205,6 +206,7 @@ const App = (() => {
       weak: {},                   // { "tid|w": số lần sai } — ôn tập thích ứng ưu tiên chỗ yếu
       mistakes: {},               // { "tid|w": [đáp án sai] } — sinh phương án nhiễu thật
       newToday: { d: '', n: 0 },  // đếm từ mới trong ngày (chống dồn cục ôn tập)
+      startView: 'dashboard',     // 'dashboard' | 'learn' | 'flashcards' | 'auto'
       minutesPerDay: 15,          // dùng cho Study Plan (ước tính ngày hoàn thành)
     };
   }
@@ -465,13 +467,38 @@ const App = (() => {
     }
     showScreen('app');
     showUserChip();
-    go(isAdmin() ? 'admin' : 'dashboard');
+    go(...openingView());
     pullState();                                 // lấy tiến độ mới nhất từ máy chủ (nếu có mạng)
     syncPush();                                  // làm mới nội dung thông báo theo tiến độ mới nhất
     if ('setAppBadge' in navigator) {            // huy hiệu số thẻ đến hạn trên icon app
       const n = dueCards().length;
       (n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
     }
+  }
+
+  // Màn hình hiện ra ngay khi mở app — người dùng tự chọn trong Cài đặt
+  function openingView() {
+    if (isAdmin() && (!S.startView || S.startView === 'dashboard')) return ['admin'];
+    const cur = currentDayIdx();
+    const due = dueCards().length;
+    switch (S.startView) {
+      case 'learn':                                     // vào thẳng bài học hôm nay
+        return cur !== -1 ? ['day', cur] : ['flashcards'];
+      case 'flashcards':                                // vào thẳng ôn flashcard
+        return ['flashcards'];
+      case 'auto':                                      // ưu tiên ôn thẻ đến hạn, hết thì học bài mới
+        if (due > 0) return ['flashcards'];
+        return cur !== -1 ? ['day', cur] : ['dashboard'];
+      default:
+        return ['dashboard'];
+    }
+  }
+
+  function setStartView(v) {
+    S.startView = v;
+    save();
+    const names = { dashboard: 'Tổng quan', learn: 'Bài học hôm nay', flashcards: 'Flashcard ôn tập', auto: 'Tự động chọn' };
+    toast('✅ Lần sau mở app sẽ vào thẳng: ' + names[v]);
   }
 
   function showUserChip() {
@@ -789,6 +816,19 @@ const App = (() => {
         <div class="view-title" style="margin:0;font-size:22px">⚙️ Cài đặt</div>
       </div>
       <div class="panel">
+        <div class="set-row">
+          <div>
+            <div class="set-name">🚀 Mở app là vào thẳng</div>
+            <div class="set-desc">Bỏ qua màn Tổng quan, bắt tay vào học ngay khi mở app.</div>
+          </div>
+          <div class="set-ctrl">
+            <select id="startview" onchange="App.setStartView(this.value)">
+              ${[['dashboard', '🏠 Tổng quan'], ['learn', '🎓 Bài học hôm nay'],
+                 ['flashcards', '🃏 Flashcard ôn tập'], ['auto', '⚡ Tự động chọn']]
+                .map(([v, n]) => `<option value="${v}" ${S.startView === v ? 'selected' : ''}>${n}</option>`).join('')}
+            </select>
+          </div>
+        </div>
         <div class="set-row">
           <div>
             <div class="set-name">📣 Bài học tự đến qua thông báo</div>
@@ -2319,7 +2359,7 @@ const App = (() => {
     openTopic, freeTab: renderFreeTopic, resetAll,
     installApp, toggleReminder, setReminderTime,
     authTab, authSubmit, logout, adminSetPass, adminResetUser, adminDeleteUser, togglePass,
-    togglePush, setPushTime, doneMission, startTestOut, setMinutes, toggleStage, toggleTopicGroup,
+    togglePush, setPushTime, doneMission, startTestOut, setMinutes, toggleStage, toggleTopicGroup, setStartView,
     learnNext, learnAnswer, learnCheckType, learnCheckScramble, learnPick, learnUnpick,
     learnSpeakStart, learnSpeakSkip,
   };

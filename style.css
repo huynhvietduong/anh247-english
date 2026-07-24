@@ -197,7 +197,7 @@ main{flex:1;padding:34px 42px;max-width:1060px}
 .stage-goal{color:var(--muted);font-size:13px;margin-top:8px;line-height:1.5}
 .stage-clear{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin:0 auto 18px;max-width:420px;background:var(--panel2)}
 .t-stage{font-size:12px;font-weight:700;color:var(--cyan);margin-bottom:6px}
-select#mpd{
+select#mpd,select#startview{
   background:var(--panel2);border:1px solid var(--border);color:var(--text);
   border-radius:9px;padding:8px 12px;font-size:14px;outline:none;cursor:pointer;
 }
@@ -570,7 +570,7 @@ input[type="time"]:focus{border-color:var(--primary)}
 
 /* Thẻ nhỏ lặp nhiều lần: chỉ dùng nền trong suốt (không blur) để giữ mượt trên điện thoại */
 .vocab-card,.phrase-item,.day-card,.topic-card,.quiz-opts .opt,.ob-options .opt,
-.scr-tile,.learn-input,.auth-inp,#inp-name,input[type="time"],select#mpd{
+.scr-tile,.learn-input,.auth-inp,#inp-name,input[type="time"],select#mpd,select#startview{
   background:var(--panel);border:1px solid var(--border);
 }
 .vocab-card,.phrase-item,.topic-card,.day-card{ box-shadow:0 4px 16px rgba(0,0,0,.16) }
@@ -596,7 +596,7 @@ input[type="time"]:focus{border-color:var(--primary)}
 }
 
 /* Ô nhập: viền sáng khi đang gõ */
-.auth-inp:focus,#inp-name:focus,.learn-input:focus,input[type="time"]:focus,select#mpd:focus{
+.auth-inp:focus,#inp-name:focus,.learn-input:focus,input[type="time"]:focus,select#mpd:focus,select#startview:focus{
   border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,211,238,.18);
 }
 .learn-input{background:var(--panel2)}
