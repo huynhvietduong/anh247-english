@@ -1111,15 +1111,33 @@ const App = (() => {
   // Dạng dễ hơn khi làm sai, tránh chuỗi thất bại liên tiếp gây nản
   const easierType = v => pick(tiersFor(v)[0]);
 
+  // Xoay mảng để phần tử đầu không trùng mục với câu liền trước
+  function avoidClash(arr, prev) {
+    if (!prev || !arr.length) return arr;
+    for (let k = 0; k < arr.length; k++) {
+      if (arr[0].v.w !== prev.v.w) break;
+      arr.push(arr.shift());
+    }
+    return arr;
+  }
+
   function nextBatch() {
     const items = LS.items.slice(LS.bi * BATCH, (LS.bi + 1) * BATCH);
     if (!items.length) return finishLearn();
-    // Xen kẽ theo VÒNG: mỗi vòng hỏi mỗi mục đúng 1 câu → hai câu cùng một mục
-    // không bao giờ liền kề, và độ khó tăng dần qua từng vòng.
-    const perItem = items.map(buildTestsFor);
-    const rounds = [];
-    for (let r = 0; r < 3; r++) rounds.push(shuffle(perItem.map(list => list[r]).filter(Boolean)));
-    LS.queue = items.map(v => ({ type: 'present', v })).concat(...rounds);
+    const perItem = items.map(buildTestsFor);      // mỗi mục: [dễ, vừa, khó]
+
+    // VÒNG 1 — giới thiệu TỪNG từ rồi kiểm tra NGAY từ đó.
+    // (Trước đây dồn 4 thẻ giới thiệu liên tiếp → phải nhớ 4 từ cùng lúc, rất khó.)
+    const q = [];
+    items.forEach((v, i) => { q.push({ type: 'present', v }); q.push(perItem[i][0]); });
+
+    // VÒNG 2 & 3 — trộn đều cả nhóm, độ khó tăng dần, cách xa lần gặp trước
+    const r2 = avoidClash(shuffle(perItem.map(l => l[1]).filter(Boolean)), q[q.length - 1]);
+    q.push(...r2);
+    const r3 = avoidClash(shuffle(perItem.map(l => l[2]).filter(Boolean)), q[q.length - 1]);
+    q.push(...r3);
+
+    LS.queue = q;
     LS.bi++;
     renderLearnTurn();
   }
