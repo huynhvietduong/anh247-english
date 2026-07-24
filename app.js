@@ -4,9 +4,11 @@
 // ============================================================
 
 const LEGACY_KEY = 'englishdaily_v1';          // dữ liệu bản cũ (một người dùng)
-const USERS_KEY = 'englishdaily_users';        // danh sách tài khoản trên thiết bị này
+const USERS_KEY = 'englishdaily_users';        // cache tài khoản (để đăng nhập được khi offline)
 const SESSION_KEY = 'englishdaily_session';    // ai đang đăng nhập
-const STATE_PREFIX = 'englishdaily_state:';    // tiến độ học của từng tài khoản
+const STATE_PREFIX = 'englishdaily_state:';    // cache tiến độ học của từng tài khoản
+const TOKEN_KEY = 'englishdaily_token';        // token đăng nhập từ máy chủ
+const API = '/api';                            // API tài khoản + đồng bộ (nginx → 127.0.0.1:5003)
 const SRS_INTERVALS = [0, 1, 3, 7, 16]; // ngày chờ giữa các lần ôn theo hộp Leitner
 const PUSH_API = '/api/push';           // backend đẩy thông báo trên VPS (nginx proxy → 127.0.0.1:5003)
 const VAPID_PUBLIC = 'BBdmFi_CDVK3hK3pI_hp9bbJNq6f7xitjMQ86CHpf8N9zP4f1ckE6we8rJIGX1ghRGNdxGecWTANpqEJqajNw1g';
@@ -18,10 +20,102 @@ const App = (() => {
   let CURRENT = localStorage.getItem(SESSION_KEY);
   let S = null;
 
+  let TOKEN = localStorage.getItem(TOKEN_KEY) || null;
+  let ROLE = null;           // 'admin' | 'student' — lấy từ máy chủ
+  let online = true;         // gọi được máy chủ hay không
+  let pendingSync = false;   // còn thay đổi chưa đẩy lên máy chủ
+
   function loadUsers() {
     try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; } catch (e) { return {}; }
   }
   function saveUsers() { localStorage.setItem(USERS_KEY, JSON.stringify(USERS)); }
+
+  // ---------- Lớp gọi API máy chủ ----------
+  async function api(path, { method = 'GET', body, auth = true } = {}) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (auth && TOKEN) headers.Authorization = 'Bearer ' + TOKEN;
+    const res = await fetch(API + path, {
+      method, headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store',
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  // Đẩy tiến độ lên máy chủ (gộp nhiều lần lưu trong 1.5s thành 1 lần gửi)
+  let pushTimer = null;
+  function schedulePush() {
+    if (!TOKEN) return;
+    pendingSync = true;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(pushState, 1500);
+  }
+
+  async function pushState() {
+    if (!TOKEN || !S) return;
+    try {
+      const r = await api('/state', { method: 'PUT', body: { state: S } });
+      if (r.ok) {
+        online = true; pendingSync = false;
+        // Máy chủ có bản mới hơn (học ở thiết bị khác) → nhận bản đó về
+        if (r.data.skipped && r.data.state) adoptState(r.data.state);
+      } else if (r.status === 401) {
+        forceLogout('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.');
+      }
+    } catch (e) {
+      online = false;   // mất mạng: giữ pendingSync, thử lại ở lần lưu sau / khi có mạng
+    }
+    updateSyncBadge();
+  }
+
+  // Kéo tiến độ mới nhất từ máy chủ về (khi mở app / đổi thiết bị)
+  async function pullState() {
+    if (!TOKEN) return;
+    try {
+      const r = await api('/state');
+      if (r.status === 401) { forceLogout('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.'); return; }
+      if (!r.ok) return;
+      online = true;
+      const srv = r.data.state;
+      const localAt = (S && S.updatedAt) || 0;
+      if (srv && (srv.updatedAt || 0) > localAt) {
+        adoptState(srv);
+        toast('☁️ Đã tải tiến độ mới nhất từ máy chủ');
+      } else if (!srv && S) {
+        pushState();          // máy chủ chưa có → đẩy bản trên máy này lên
+      } else if (pendingSync) {
+        pushState();
+      }
+    } catch (e) { online = false; }
+    updateSyncBadge();
+  }
+
+  function adoptState(srv) {
+    // Đang làm quiz thì không thay dữ liệu giữa chừng — để lần đồng bộ sau
+    if (document.getElementById('quiz-opts')) return;
+    S = normalizeState(srv);
+    localStorage.setItem(stateKey(CURRENT), JSON.stringify(S));
+    const active = document.querySelector('.nav-item.active');
+    const view = active && active.dataset.view;
+    if (view && !document.getElementById('app').classList.contains('hidden')) go(view);
+  }
+
+  function updateSyncBadge() {
+    const el = document.getElementById('sync-badge');
+    if (!el) return;
+    if (!TOKEN) { el.textContent = '📴 Chỉ lưu trên máy này'; el.className = 'sync-badge warn'; return; }
+    if (!online) { el.textContent = '⚠️ Mất mạng — sẽ tự đồng bộ lại'; el.className = 'sync-badge warn'; }
+    else if (pendingSync) { el.textContent = '⏳ Đang đồng bộ...'; el.className = 'sync-badge'; }
+    else { el.textContent = '☁️ Đã đồng bộ'; el.className = 'sync-badge ok'; }
+  }
+
+  function forceLogout(msg) {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(SESSION_KEY);
+    TOKEN = null;
+    if (msg) alert(msg);
+    location.reload();
+  }
 
   // Băm mật khẩu (che giấu cơ bản — app tĩnh không có máy chủ nên không phải bảo mật tuyệt đối)
   function hashPass(p) {
@@ -45,23 +139,33 @@ const App = (() => {
 
   const stateKey = u => STATE_PREFIX + u;
 
+  // Bổ sung các trường mới cho dữ liệu cũ (dù đến từ localStorage hay máy chủ)
+  function normalizeState(s) {
+    if (!s) return null;
+    if (!s.reminder) s.reminder = { enabled: false, time: '20:00' };
+    if (!('lastNotified' in s)) s.lastNotified = null;
+    if (!s.push) s.push = { enabled: false, times: ['07:00', '12:30', '20:00'] };
+    if (!s.missions) s.missions = {};
+    if (!s.weak) s.weak = {};                 // { "tid|w": số lần sai } — điểm yếu cần ôn thêm
+    if (!('minutesPerDay' in s)) s.minutesPerDay = 15;
+    if (!('updatedAt' in s)) s.updatedAt = 0;
+    return s;
+  }
+
   function loadState(username) {
     try {
       const raw = localStorage.getItem(stateKey(username));
-      if (raw) {
-        const s = JSON.parse(raw);
-        if (!s.reminder) s.reminder = { enabled: false, time: '20:00' };
-        if (!('lastNotified' in s)) s.lastNotified = null;
-        if (!s.push) s.push = { enabled: false, times: ['07:00', '12:30', '20:00'] };
-        if (!s.missions) s.missions = {};
-        if (!s.weak) s.weak = {};                 // { "tid|w": số lần sai } — điểm yếu cần ôn thêm
-        if (!('minutesPerDay' in s)) s.minutesPerDay = 15;
-        return s;
-      }
+      if (raw) return normalizeState(JSON.parse(raw));
     } catch (e) {}
     return null;
   }
-  function save() { if (CURRENT) localStorage.setItem(stateKey(CURRENT), JSON.stringify(S)); }
+
+  function save() {
+    if (!CURRENT || !S) return;
+    S.updatedAt = Date.now();
+    localStorage.setItem(stateKey(CURRENT), JSON.stringify(S));   // lưu ngay (dùng được offline)
+    schedulePush();                                               // rồi đẩy lên máy chủ
+  }
 
   function freshState(name, level) {
     return {
@@ -196,8 +300,8 @@ const App = (() => {
     document.getElementById('pass2-wrap').classList.toggle('hidden', mode === 'login');
     document.getElementById('auth-title').textContent = mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản mới';
     document.getElementById('auth-sub').textContent = mode === 'login'
-      ? 'Đăng nhập để tiếp tục lộ trình học của bạn.'
-      : 'Mỗi tài khoản có lộ trình và tiến độ học riêng.';
+      ? 'Đăng nhập để tiếp tục lộ trình học của bạn — trên điện thoại hay máy tính đều cùng một tiến độ.'
+      : 'Tài khoản lưu trên máy chủ: học ở thiết bị nào cũng nối tiếp được tiến độ.';
     document.getElementById('auth-submit').textContent = mode === 'login' ? 'Đăng nhập' : 'Đăng ký & bắt đầu';
     authErr('');
   }
@@ -213,43 +317,114 @@ const App = (() => {
     inp.focus();
   }
 
-  function authSubmit() {
+  function authBusy(on, label) {
+    const b = document.getElementById('auth-submit');
+    if (!b) return;
+    b.disabled = on;
+    b.textContent = on ? (label || 'Đang xử lý...') : (authMode === 'login' ? 'Đăng nhập' : 'Đăng ký & bắt đầu');
+  }
+
+  // Đăng nhập thành công: lưu token/phiên rồi vào app
+  function acceptSession(u, token, role, serverState) {
+    CURRENT = u;
+    TOKEN = token || null;
+    ROLE = role || 'student';
+    if (TOKEN) localStorage.setItem(TOKEN_KEY, TOKEN); else localStorage.removeItem(TOKEN_KEY);
+    localStorage.setItem(SESSION_KEY, u);
+    // Nếu máy chủ có bản mới hơn bản trên máy → dùng bản của máy chủ
+    const local = loadState(u);
+    const srv = normalizeState(serverState);
+    if (srv && (!local || (srv.updatedAt || 0) > (local.updatedAt || 0))) {
+      localStorage.setItem(stateKey(u), JSON.stringify(srv));
+    }
+    document.getElementById('auth-pass').value = '';
+    document.getElementById('auth-pass2').value = '';
+    enterApp();
+    if (TOKEN && !srv && loadState(u)) pushState();   // máy chủ chưa có tiến độ → đẩy bản cũ lên
+  }
+
+  async function authSubmit() {
     const u = document.getElementById('auth-user').value.trim().toLowerCase();
     const p = document.getElementById('auth-pass').value;
     if (!u || !p) return authErr('Vui lòng nhập đủ tên đăng nhập và mật khẩu.');
+    authErr('');
 
     if (authMode === 'reg') {
       const p2 = document.getElementById('auth-pass2').value;
       if (!/^[a-z0-9_.-]{3,24}$/.test(u)) return authErr('Tên đăng nhập: 3–24 ký tự, chỉ gồm chữ thường, số, dấu . _ -');
-      if (USERS[u]) return authErr('Tên đăng nhập này đã tồn tại.');
       if (p.length < 4) return authErr('Mật khẩu cần ít nhất 4 ký tự.');
       if (p !== p2) return authErr('Mật khẩu nhập lại không khớp.');
-      USERS[u] = { pass: hashPass(p), role: 'student', created: todayStr() };
-      saveUsers();
-      // chuyển tiến độ của bản cũ (trước khi có tài khoản) sang người đăng ký đầu tiên
-      const legacy = localStorage.getItem(LEGACY_KEY);
-      if (legacy && !localStorage.getItem(stateKey(u))) {
-        localStorage.setItem(stateKey(u), legacy);
-        localStorage.removeItem(LEGACY_KEY);
+      authBusy(true, 'Đang tạo tài khoản...');
+      try {
+        const r = await api('/auth/register', { method: 'POST', auth: false, body: { username: u, password: p } });
+        authBusy(false);
+        if (!r.ok) return authErr(r.data.err || 'Không tạo được tài khoản.');
+        // cache để đăng nhập được cả khi mất mạng
+        USERS[u] = { pass: hashPass(p), role: 'student', created: todayStr() };
+        saveUsers();
+        // chuyển tiến độ bản cũ (trước khi có tài khoản) sang người đăng ký đầu tiên
+        const legacy = localStorage.getItem(LEGACY_KEY);
+        if (legacy && !localStorage.getItem(stateKey(u))) {
+          localStorage.setItem(stateKey(u), legacy);
+          localStorage.removeItem(LEGACY_KEY);
+        }
+        return acceptSession(u, r.data.token, r.data.role, r.data.state);
+      } catch (e) {
+        authBusy(false);
+        return authErr('Không kết nối được máy chủ. Cần có mạng để tạo tài khoản mới.');
       }
-    } else {
-      if (!USERS[u]) return authErr('Tài khoản không tồn tại. Bấm "Đăng ký" để tạo mới.');
-      if (USERS[u].pass !== hashPass(p)) return authErr('Sai mật khẩu, thử lại nhé.');
     }
 
-    CURRENT = u;
-    localStorage.setItem(SESSION_KEY, u);
-    document.getElementById('auth-pass').value = '';
-    document.getElementById('auth-pass2').value = '';
-    enterApp();
+    // --- Đăng nhập ---
+    authBusy(true, 'Đang đăng nhập...');
+    let r;
+    try {
+      r = await api('/auth/login', { method: 'POST', auth: false, body: { username: u, password: p } });
+    } catch (e) {
+      authBusy(false);
+      // Mất mạng: cho đăng nhập bằng bản lưu trên máy (chỉ khi máy này từng đăng nhập)
+      if (USERS[u] && USERS[u].pass === hashPass(p) && loadState(u)) {
+        online = false;
+        toast('📴 Không có mạng — đang dùng dữ liệu lưu trên máy này');
+        return acceptSession(u, null, USERS[u].role, null);
+      }
+      return authErr('Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.');
+    }
+    authBusy(false);
+
+    if (r.ok) {
+      USERS[u] = { pass: hashPass(p), role: r.data.role, created: (USERS[u] && USERS[u].created) || todayStr() };
+      saveUsers();
+      return acceptSession(u, r.data.token, r.data.role, r.data.state);
+    }
+    // Tài khoản cũ chỉ có trên máy này → tự chuyển lên máy chủ (giữ nguyên tiến độ)
+    if (r.status === 404 && USERS[u] && USERS[u].pass === hashPass(p)) {
+      authBusy(true, 'Đang chuyển tài khoản lên máy chủ...');
+      try {
+        const reg = await api('/auth/register', { method: 'POST', auth: false, body: { username: u, password: p } });
+        authBusy(false);
+        if (reg.ok) {
+          toast('☁️ Đã chuyển tài khoản của bạn lên máy chủ — giờ đăng nhập được ở mọi thiết bị!');
+          return acceptSession(u, reg.data.token, reg.data.role, null);
+        }
+      } catch (e) { authBusy(false); }
+    }
+    if (r.status === 404) return authErr('Tài khoản không tồn tại. Bấm "Đăng ký" để tạo mới.');
+    return authErr(r.data.err || 'Đăng nhập thất bại.');
   }
 
-  function logout() {
+  async function logout() {
+    if (pendingSync) { try { await pushState(); } catch (e) {} }   // đẩy nốt tiến độ trước khi thoát
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    TOKEN = null;
     location.reload();
   }
 
-  function isAdmin() { return CURRENT && USERS[CURRENT] && USERS[CURRENT].role === 'admin'; }
+  function isAdmin() {
+    if (ROLE) return ROLE === 'admin';
+    return !!(CURRENT && USERS[CURRENT] && USERS[CURRENT].role === 'admin');
+  }
 
   function enterApp() {
     S = loadState(CURRENT);
@@ -266,15 +441,24 @@ const App = (() => {
       return;
     }
     showScreen('app');
-    document.getElementById('nav-admin').classList.toggle('hidden', !isAdmin());
-    const chip = document.getElementById('user-chip');
-    if (chip) chip.innerHTML = `👤 <b>${esc(CURRENT)}</b>${isAdmin() ? ' <span class="role-badge">admin</span>' : ''}`;
+    showUserChip();
     go(isAdmin() ? 'admin' : 'dashboard');
+    pullState();                                 // lấy tiến độ mới nhất từ máy chủ (nếu có mạng)
     syncPush();                                  // làm mới nội dung thông báo theo tiến độ mới nhất
     if ('setAppBadge' in navigator) {            // huy hiệu số thẻ đến hạn trên icon app
       const n = dueCards().length;
       (n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
     }
+  }
+
+  function showUserChip() {
+    document.getElementById('nav-admin').classList.toggle('hidden', !isAdmin());
+    const chip = document.getElementById('user-chip');
+    if (chip) {
+      chip.innerHTML = `👤 <b>${esc(CURRENT)}</b>${isAdmin() ? ' <span class="role-badge">admin</span>' : ''}`
+        + `<div id="sync-badge" class="sync-badge">…</div>`;
+    }
+    updateSyncBadge();
   }
 
   // ---------- Onboarding ----------
@@ -343,10 +527,9 @@ const App = (() => {
 
   function finishOnboard() {
     showScreen('app');
-    document.getElementById('nav-admin').classList.toggle('hidden', !isAdmin());
-    const chip = document.getElementById('user-chip');
-    if (chip) chip.innerHTML = `👤 <b>${esc(CURRENT)}</b>${isAdmin() ? ' <span class="role-badge">admin</span>' : ''}`;
+    showUserChip();
     go('dashboard');
+    pushState();     // đẩy lộ trình vừa tạo lên máy chủ ngay
   }
 
   // ---------- Điều hướng ----------
@@ -1204,44 +1387,69 @@ const App = (() => {
   }
 
   // ---------- Giao diện quản trị (admin) ----------
-  function renderAdmin() {
+  let adminUsers = null;
+
+  async function renderAdmin() {
     if (!isAdmin()) { go('dashboard'); return; }
-    const names = Object.keys(USERS);
-    const rows = names.map(u => {
+    main().innerHTML = `<div class="view-title">🛠️ Quản trị hệ thống</div>
+      <div class="view-sub">Đang tải danh sách học viên từ máy chủ…</div>`;
+    try {
+      const r = await api('/admin/users');
+      if (r.status === 403) { toast('⚠️ Tài khoản này không có quyền quản trị'); go('dashboard'); return; }
+      if (r.ok) { adminUsers = r.data.users; online = true; }
+    } catch (e) { online = false; }
+    drawAdmin();
+  }
+
+  function drawAdmin() {
+    // Không gọi được máy chủ → hiển thị bản lưu trên máy này (chế độ offline)
+    const offlineMode = !adminUsers;
+    const list = adminUsers || Object.keys(USERS).map(u => {
       const st = loadState(u);
-      const role = USERS[u].role;
-      const prog = st && st.plan ? `${st.done.length}/${st.plan.length}` : '—';
-      const pct = st && st.plan ? Math.round(st.done.length / st.plan.length * 100) : 0;
-      const words = st ? Object.keys(st.srs).length : 0;
-      const acc = st && st.quizStats.total ? Math.round(st.quizStats.correct / st.quizStats.total * 100) + '%' : '—';
-      const lvName = st ? ({ 1: 'Cơ bản', 2: 'Sơ trung', 3: 'Trung cấp' })[st.level] : '—';
+      return {
+        username: u, role: USERS[u].role, created: USERS[u].created,
+        level: st && st.level, done: st ? st.done.length : 0, planLen: st && st.plan ? st.plan.length : 0,
+        srs: st ? Object.keys(st.srs).length : 0, weak: st ? Object.keys(st.weak || {}).length : 0,
+        streak: st ? st.streak : 0, lastStudy: st && st.lastStudy,
+        quizTotal: st ? st.quizStats.total : 0, quizCorrect: st ? st.quizStats.correct : 0,
+      };
+    });
+
+    const rows = list.map(x => {
+      const prog = x.planLen ? `${x.done}/${x.planLen}` : '—';
+      const pct = x.planLen ? Math.round(x.done / x.planLen * 100) : 0;
+      const acc = x.quizTotal ? Math.round(x.quizCorrect / x.quizTotal * 100) + '%' : '—';
+      const lvName = ({ 1: 'Cơ bản', 2: 'Sơ trung', 3: 'Trung cấp' })[x.level] || '—';
       return `<tr>
-        <td><b>${esc(u)}</b>${role === 'admin' ? ' <span class="role-badge">admin</span>' : ''}<div class="td-sub">tạo: ${USERS[u].created || '—'}</div></td>
+        <td><b>${esc(x.username)}</b>${x.role === 'admin' ? ' <span class="role-badge">admin</span>' : ''}
+          <div class="td-sub">tạo: ${esc(x.created || '—')}${x.name ? ' · ' + esc(x.name) : ''}</div></td>
         <td>${lvName}</td>
         <td>${prog}<div class="mini-bar"><div style="width:${pct}%"></div></div></td>
-        <td>${words}</td>
-        <td>${st ? '🔥 ' + st.streak : '—'}</td>
+        <td>${x.srs || 0}</td>
+        <td>${x.planLen ? '🔥 ' + (x.streak || 0) : '—'}</td>
         <td>${acc}</td>
-        <td>${st && st.lastStudy ? st.lastStudy : 'chưa học'}</td>
+        <td>${x.lastStudy ? esc(x.lastStudy) : 'chưa học'}</td>
         <td class="td-actions">
-          <button class="btn btn-sm btn-outline" onclick="App.adminSetPass('${esc(u)}')" title="Đặt lại mật khẩu">🔑</button>
-          <button class="btn btn-sm btn-outline" onclick="App.adminResetUser('${esc(u)}')" title="Xóa tiến độ học">↺</button>
-          ${u !== CURRENT ? `<button class="btn btn-sm btn-outline btn-danger" onclick="App.adminDeleteUser('${esc(u)}')" title="Xóa tài khoản">🗑️</button>` : ''}
+          <button class="btn btn-sm btn-outline" onclick="App.adminSetPass('${esc(x.username)}')" title="Đặt lại mật khẩu">🔑</button>
+          <button class="btn btn-sm btn-outline" onclick="App.adminResetUser('${esc(x.username)}')" title="Xóa tiến độ học">↺</button>
+          ${x.username !== CURRENT ? `<button class="btn btn-sm btn-outline btn-danger" onclick="App.adminDeleteUser('${esc(x.username)}')" title="Xóa tài khoản">🗑️</button>` : ''}
         </td>
       </tr>`;
     }).join('');
 
-    const students = names.filter(u => USERS[u].role !== 'admin');
-    const totalDays = names.reduce((n, u) => { const st = loadState(u); return n + (st ? st.done.length : 0); }, 0);
-    const totalWords = names.reduce((n, u) => { const st = loadState(u); return n + (st ? Object.keys(st.srs).length : 0); }, 0);
-    const activeToday = names.filter(u => { const st = loadState(u); return st && st.lastStudy === todayStr(); }).length;
+    const students = list.filter(x => x.role !== 'admin');
+    const totalDays = list.reduce((n, x) => n + (x.done || 0), 0);
+    const totalWords = list.reduce((n, x) => n + (x.srs || 0), 0);
+    const activeToday = list.filter(x => x.lastStudy === todayStr()).length;
     const nVocab = TOPICS.reduce((n, t) => n + t.vocab.length, 0);
     const nPhrases = TOPICS.reduce((n, t) => n + t.phrases.length, 0);
     const nChunks = TOPICS.reduce((n, t) => n + (t.chunks || []).length, 0);
 
     main().innerHTML = `
       <div class="view-title">🛠️ Quản trị hệ thống</div>
-      <div class="view-sub">Quản lý các tài khoản đã đăng ký trên thiết bị này.</div>
+      <div class="view-sub">${offlineMode
+        ? '⚠️ <b style="color:var(--yellow)">Không kết nối được máy chủ</b> — đang hiển thị bản lưu trên máy này. Kết nối mạng để thấy toàn bộ học viên.'
+        : 'Toàn bộ học viên trên mọi thiết bị, dữ liệu lấy trực tiếp từ máy chủ.'}</div>
       <div class="stat-grid">
         <div class="stat-card"><div class="ico">👥</div><div class="num">${students.length}</div><div class="lbl">Học viên</div></div>
         <div class="stat-card"><div class="ico">✅</div><div class="num">${totalDays}</div><div class="lbl">Tổng ngày đã hoàn thành</div></div>
@@ -1268,7 +1476,7 @@ const App = (() => {
           <span>🎭 ${TOPICS.length} hội thoại</span>
           <span>🎯 ${PLACEMENT_TEST.length} câu kiểm tra đầu vào</span>
         </div>
-        <div class="td-sub" style="margin-top:8px">Muốn thêm chủ đề/từ vựng: mở tệp <b>data.js</b>, thêm theo đúng mẫu có sẵn rồi đăng lại web.</div>
+        <div class="td-sub" style="margin-top:8px">Muốn thêm chủ đề/từ vựng: mở tệp <b>data.js / data2.js / data3.js</b>, thêm theo đúng mẫu có sẵn rồi đăng lại web.</div>
       </div>
       <div class="panel">
         <h3>🔐 Bảo mật</h3>
@@ -1279,37 +1487,48 @@ const App = (() => {
           </div>
           <div class="set-ctrl"><button class="btn btn-sm btn-outline" onclick="App.adminSetPass('${esc(CURRENT)}')">Đổi mật khẩu</button></div>
         </div>
-        <div class="td-sub">Lưu ý: đây là web tĩnh không có máy chủ — tài khoản chỉ lưu trên trình duyệt của từng thiết bị, dùng để phân hồ sơ học và ngăn người dùng thường vào trang quản trị, không phải bảo mật tuyệt đối.</div>
+        <div class="td-sub">Tài khoản và tiến độ được lưu trên <b>máy chủ của bạn</b> (mật khẩu băm PBKDF2, truyền qua HTTPS). Học viên đăng nhập ở thiết bị nào cũng ra đúng dữ liệu của mình.</div>
       </div>`;
   }
 
-  function adminSetPass(u) {
-    if (!isAdmin() || !USERS[u]) return;
+  async function adminSetPass(u) {
+    if (!isAdmin()) return;
     const p = prompt(`Nhập mật khẩu mới cho tài khoản "${u}" (tối thiểu 4 ký tự):`);
     if (p === null) return;
     if (p.length < 4) { toast('⚠️ Mật khẩu cần ít nhất 4 ký tự'); return; }
-    USERS[u].pass = hashPass(p);
-    saveUsers();
-    toast(`🔑 Đã đổi mật khẩu cho "${u}"`);
+    try {
+      const r = await api('/admin/user-password', { method: 'POST', body: { username: u, password: p } });
+      if (!r.ok) return toast('⚠️ ' + (r.data.err || 'Không đổi được mật khẩu'));
+      if (USERS[u]) { USERS[u].pass = hashPass(p); saveUsers(); }
+      toast(`🔑 Đã đổi mật khẩu cho "${u}"`);
+    } catch (e) { toast('⚠️ Cần có mạng để đổi mật khẩu trên máy chủ'); }
   }
 
-  function adminResetUser(u) {
-    if (!isAdmin() || !USERS[u]) return;
+  async function adminResetUser(u) {
+    if (!isAdmin()) return;
     if (!confirm(`Xóa toàn bộ tiến độ học của "${u}"? (tài khoản vẫn giữ nguyên)`)) return;
-    localStorage.removeItem(stateKey(u));
-    if (u === CURRENT) S = null;
-    toast(`↺ Đã xóa tiến độ của "${u}"`);
-    renderAdmin();
+    try {
+      const r = await api('/admin/user-reset', { method: 'POST', body: { username: u } });
+      if (!r.ok) return toast('⚠️ ' + (r.data.err || 'Không xóa được tiến độ'));
+      localStorage.removeItem(stateKey(u));
+      if (u === CURRENT) { S = null; }
+      toast(`↺ Đã xóa tiến độ của "${u}"`);
+      renderAdmin();
+    } catch (e) { toast('⚠️ Cần có mạng để thực hiện trên máy chủ'); }
   }
 
-  function adminDeleteUser(u) {
-    if (!isAdmin() || !USERS[u] || u === CURRENT) return;
+  async function adminDeleteUser(u) {
+    if (!isAdmin() || u === CURRENT) return;
     if (!confirm(`Xóa hẳn tài khoản "${u}" cùng toàn bộ tiến độ học?`)) return;
-    delete USERS[u];
-    saveUsers();
-    localStorage.removeItem(stateKey(u));
-    toast(`🗑️ Đã xóa tài khoản "${u}"`);
-    renderAdmin();
+    try {
+      const r = await api('/admin/user-delete', { method: 'POST', body: { username: u } });
+      if (!r.ok) return toast('⚠️ ' + (r.data.err || 'Không xóa được tài khoản'));
+      delete USERS[u];
+      saveUsers();
+      localStorage.removeItem(stateKey(u));
+      toast(`🗑️ Đã xóa tài khoản "${u}"`);
+      renderAdmin();
+    } catch (e) { toast('⚠️ Cần có mạng để thực hiện trên máy chủ'); }
   }
 
   // ---------- Tiện ích ----------
@@ -1325,8 +1544,10 @@ const App = (() => {
     toastTimer = setTimeout(() => t.classList.add('hidden'), 2600);
   }
 
-  function resetAll() {
-    if (!confirm(`Xóa toàn bộ tiến độ học của tài khoản "${CURRENT}" và làm lại kiểm tra đầu vào?`)) return;
+  async function resetAll() {
+    if (!confirm(`Xóa toàn bộ tiến độ học của tài khoản "${CURRENT}" và làm lại kiểm tra đầu vào?\n\nTiến độ trên MỌI thiết bị của tài khoản này sẽ bị xóa.`)) return;
+    clearTimeout(pushTimer);                       // hủy lần đẩy đang chờ, tránh ghi lại bản vừa xóa
+    if (TOKEN) { try { await api('/state', { method: 'DELETE' }); } catch (e) {} }
     if (CURRENT) localStorage.removeItem(stateKey(CURRENT));
     location.reload();
   }
@@ -1591,13 +1812,19 @@ const App = (() => {
     if ('speechSynthesis' in window) speechSynthesis.getVoices();
     setupPwa();
     lockZoom();
-    ensureAdmin();
     ['auth-user', 'auth-pass', 'auth-pass2'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') authSubmit(); });
     });
-    if (CURRENT && USERS[CURRENT]) {
-      enterApp();
+    // Có mạng trở lại → đẩy nốt phần chưa đồng bộ
+    window.addEventListener('online', () => { online = true; pendingSync ? pushState() : pullState(); });
+    window.addEventListener('offline', () => { online = false; updateSyncBadge(); });
+    // Rời trang mà còn dữ liệu chưa đẩy → cố gửi nốt
+    document.addEventListener('visibilitychange', () => { if (document.hidden && pendingSync) pushState(); });
+
+    if (CURRENT && (TOKEN || USERS[CURRENT])) {
+      ROLE = USERS[CURRENT] ? USERS[CURRENT].role : null;
+      enterApp();     // vào ngay từ bản lưu trên máy, rồi tự đồng bộ ở nền
     } else {
       CURRENT = null;
       localStorage.removeItem(SESSION_KEY);
