@@ -9,7 +9,14 @@ const SESSION_KEY = 'englishdaily_session';    // ai đang đăng nhập
 const STATE_PREFIX = 'englishdaily_state:';    // cache tiến độ học của từng tài khoản
 const TOKEN_KEY = 'englishdaily_token';        // token đăng nhập từ máy chủ
 const API = '/api';                            // API tài khoản + đồng bộ (nginx → 127.0.0.1:5003)
-const SRS_INTERVALS = [0, 1, 3, 7, 16]; // ngày chờ giữa các lần ôn theo hộp Leitner
+// ===== Bộ lập lịch LAI: thang cố định theo PHÚT (Memrise) cho giai đoạn đầu,
+// rồi chuyển sang SM-2 đã vá (easiness có sàn/trần) cho giai đoạn dài hạn. =====
+const LEARN_STEPS_MIN = [10, 240, 1440];   // 10 phút → 4 giờ → 24 giờ
+const MIN_PER_DAY = 1440;
+const MAX_IVL_MIN = 180 * MIN_PER_DAY;     // trần 6 tháng
+const REVIEW_CAP = 40;                     // trần số thẻ ôn mỗi phiên (chống "cục review dồn")
+const NEW_SOFT_CAP = 25;                   // ngưỡng cảnh báo số từ mới trong ngày
+const SRS_INTERVALS_OLD = [0, 1, 3, 7, 16]; // dùng để nâng cấp dữ liệu cũ
 const PUSH_API = '/api/push';           // backend đẩy thông báo trên VPS (nginx proxy → 127.0.0.1:5003)
 const VAPID_PUBLIC = 'BBdmFi_CDVK3hK3pI_hp9bbJNq6f7xitjMQ86CHpf8N9zP4f1ckE6we8rJIGX1ghRGNdxGecWTANpqEJqajNw1g';
 
@@ -147,8 +154,22 @@ const App = (() => {
     if (!s.push) s.push = { enabled: false, times: ['07:00', '12:30', '20:00'] };
     if (!s.missions) s.missions = {};
     if (!s.weak) s.weak = {};                 // { "tid|w": số lần sai } — điểm yếu cần ôn thêm
+    if (!s.mistakes) s.mistakes = {};         // { "tid|w": [đáp án sai đã gõ] } — dùng làm nhiễu
+    if (!s.newToday) s.newToday = { d: '', n: 0 };
     if (!('minutesPerDay' in s)) s.minutesPerDay = 15;
     if (!('updatedAt' in s)) s.updatedAt = 0;
+    // Nâng cấp thẻ SRS bản cũ {box, due:'YYYY-MM-DD'} → lịch theo phút có easiness
+    Object.keys(s.srs || {}).forEach(k => {
+      const c = s.srs[k];
+      if (c && c.lvl === undefined) {
+        const box = c.box || 0;
+        s.srs[k] = {
+          lvl: box, ef: 2.5, reps: box, ivl: (SRS_INTERVALS_OLD[box] || 1) * MIN_PER_DAY,
+          due: c.due ? new Date(c.due + 'T08:00:00').getTime() : Date.now(),
+          lapses: 0, hard: false, seen: box, ok: box,
+        };
+      }
+    });
     return s;
   }
 
@@ -182,6 +203,8 @@ const App = (() => {
       push: { enabled: false, times: ['07:00', '12:30', '20:00'] },
       missions: {},               // { 'YYYY-MM-DD': true } — thử thách đời thực đã làm
       weak: {},                   // { "tid|w": số lần sai } — ôn tập thích ứng ưu tiên chỗ yếu
+      mistakes: {},               // { "tid|w": [đáp án sai] } — sinh phương án nhiễu thật
+      newToday: { d: '', n: 0 },  // đếm từ mới trong ngày (chống dồn cục ôn tập)
       minutesPerDay: 15,          // dùng cho Study Plan (ước tính ngày hoàn thành)
     };
   }
@@ -578,26 +601,89 @@ const App = (() => {
     return ids;
   }
 
+  // ---------- Bộ lập lịch ----------
+  const newCard = () => ({ lvl: 0, ef: 2.5, reps: 0, ivl: 0, due: Date.now(), lapses: 0, hard: false, seen: 0, ok: 0 });
+
+  // Suy ra chất lượng nhớ (0..5) từ đúng/sai + thời gian trả lời.
+  // Không bắt người học tự chấm "dễ/khó" — họ sẽ bấm bừa (bẫy số 7 trong tài liệu).
+  const EXPECT_MS = { mc_word: 4000, mc_meaning: 4000, listen: 5000, listen_mean: 5500,
+    cloze_mc: 6000, scramble: 9000, type: 12000, cloze_type: 12000, speak: 9000, flashcard: 6000 };
+  function inferQuality(correct, ms, type) {
+    if (!correct) return ms > 15000 ? 0 : 2;
+    const t = EXPECT_MS[type] || 7000;
+    if (ms < t * 0.6) return 5;      // trả lời nhanh, chắc chắn
+    if (ms < t * 1.5) return 4;      // bình thường
+    return 3;                        // đúng nhưng do dự
+  }
+
+  function schedule(card, correct, quality) {
+    const c = Object.assign(newCard(), card);
+    c.seen++;
+    if (correct) {
+      c.ok++;
+      c.lvl++;
+      c.reps++;
+      const d = 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02);
+      c.ef = Math.min(2.8, Math.max(1.3, c.ef + d));       // sàn/trần chống "ease hell"
+      if (c.lvl <= LEARN_STEPS_MIN.length) c.ivl = LEARN_STEPS_MIN[c.lvl - 1];
+      else if (c.lvl === LEARN_STEPS_MIN.length + 1) c.ivl = 6 * MIN_PER_DAY;
+      else c.ivl = Math.ceil((c.ivl || MIN_PER_DAY) * c.ef);
+      c.ivl = Math.min(c.ivl, MAX_IVL_MIN);
+      if (c.hard && c.reps >= 2) c.hard = false;            // gỡ cờ khó khi đã đúng 2 lần liên tiếp
+    } else {
+      c.lapses++;
+      if (c.lapses >= 3) c.hard = true;
+      // KHÔNG đưa về 0 — chỉ tụt bậc, để người học không nản
+      c.lvl = c.lvl > LEARN_STEPS_MIN.length ? Math.max(1, c.lvl - 2) : Math.max(0, c.lvl - 1);
+      c.reps = 0;
+      c.ef = Math.max(1.3, c.ef - 0.2);
+      c.ivl = LEARN_STEPS_MIN[0];                           // gặp lại sau 10 phút
+    }
+    // fuzz ±10% để các thẻ học cùng lúc không đến hạn dồn cục mãi mãi
+    c.due = Date.now() + c.ivl * 60000 * (1 + (Math.random() - 0.5) * 0.2);
+    return c;
+  }
+
+  // Ghi nhận một lượt trả lời: cập nhật lịch + nhật ký lỗi sai
+  function gradeItem(key, correct, ms, type, userAnswer) {
+    const q = inferQuality(correct, ms, type);
+    S.srs[key] = schedule(S.srs[key] || newCard(), correct, q);
+    if (correct) { if (S.weak[key]) { if (--S.weak[key] <= 0) delete S.weak[key]; } }
+    else {
+      S.weak[key] = (S.weak[key] || 0) + 1;
+      // Lưu đáp án SAI để dùng làm phương án nhiễu thật ở các lần sau
+      if (userAnswer && norm(userAnswer) !== norm(key.split('|').slice(1).join('|'))) {
+        const arr = S.mistakes[key] = S.mistakes[key] || [];
+        if (!arr.some(x => norm(x) === norm(userAnswer)) && userAnswer.length < 40) arr.unshift(userAnswer);
+        if (arr.length > 3) arr.pop();
+      }
+    }
+    S.quizStats.total++; if (correct) S.quizStats.correct++;
+    return S.srs[key];
+  }
+
   function addTopicToSrs(topicId) {
     const t = topicById(topicId);
     if (!t) return;
     vocabOf(t).forEach(v => {
       const key = topicId + '|' + v.w;
-      if (!S.srs[key]) S.srs[key] = { box: 0, due: todayStr() };
+      if (!S.srs[key]) S.srs[key] = newCard();
     });
     save();
   }
 
   function dueCards() {
-    const today = todayStr();
-    return Object.entries(S.srs)
-      .filter(([, c]) => c.due <= today)
+    const now = Date.now();
+    const all = Object.entries(S.srs)
+      .filter(([, c]) => (c.due || 0) <= now)
+      .sort((a, b) => (a[1].due || 0) - (b[1].due || 0))    // quá hạn lâu nhất lên trước
       .map(([key, c]) => {
         const [tid, ...rest] = key.split('|');
         const v = findItem(tid, rest.join('|'));
         return v ? { key, card: c, v, topic: topicById(tid) } : null;
       })
       .filter(Boolean);
+    return all;
   }
 
   // ---------- Phát âm (TTS) ----------
@@ -939,7 +1025,7 @@ const App = (() => {
       dayIdx, topicIds, pool,
       items: shuffle(pool),
       bi: 0, queue: [], done: 0, wrong: 0,
-      learned: new Set(),
+      learned: new Set(), tries: {}, tStart: 0,
     };
     nextBatch();
   }
@@ -952,24 +1038,38 @@ const App = (() => {
     return v.ex.replace(re, '_____');
   }
 
-  // Chọn ngẫu nhiên các dạng bài cho một mục: 2 bài nhận diện + 1 bài tự sản sinh
-  function buildTestsFor(v) {
+  // Ba tầng độ khó — "giàn giáo": hỗ trợ nhiều lúc đầu, rút dần khi đã vững
+  function tiersFor(v) {
     const multi = v.w.includes(' ');
     const hasCloze = !!clozeOf(v);
-    let recog = ['mc_word', 'mc_meaning', 'listen', 'listen_mean'];
-    if (hasCloze) recog.push('cloze_mc');
-    let prod = multi ? ['scramble', 'speak'] : ['type', 'speak'];
-    if (hasCloze && !multi) prod.push('cloze_type');
-    recog = shuffle(recog); prod = shuffle(prod);
-    return [{ type: recog[0], v }, { type: recog[1], v }, { type: prod[0], v }];
+    const easy = ['mc_word', 'mc_meaning'];
+    const mid = ['listen', 'listen_mean'].concat(hasCloze ? ['cloze_mc'] : []);
+    const hard = (multi ? ['scramble'] : ['type']).concat(hasCloze && !multi ? ['cloze_type'] : []).concat(['speak']);
+    return [easy, mid, hard];
   }
+
+  // Bài kiểm tra cho một mục, KHÓ DẦN theo tầng (không bốc ngẫu nhiên toàn bộ)
+  function buildTestsFor(v) {
+    const t = tiersFor(v);
+    const key = v.tid + '|' + v.w;
+    const card = S.srs[key];
+    // Thẻ đang bị đánh dấu khó → hạ một bậc để người học có cơ hội thành công
+    if (card && card.hard) return [{ type: pick(t[0]), v }, { type: pick(t[0]), v }, { type: pick(t[1]), v }];
+    return [{ type: pick(t[0]), v }, { type: pick(t[1]), v }, { type: pick(t[2]), v }];
+  }
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  // Dạng dễ hơn khi làm sai, tránh chuỗi thất bại liên tiếp gây nản
+  const easierType = v => pick(tiersFor(v)[0]);
 
   function nextBatch() {
     const items = LS.items.slice(LS.bi * BATCH, (LS.bi + 1) * BATCH);
     if (!items.length) return finishLearn();
-    // Giới thiệu từng từ, rồi trộn tất cả bài kiểm tra của cả nhóm
-    const tests = items.flatMap(buildTestsFor);
-    LS.queue = items.map(v => ({ type: 'present', v })).concat(shuffle(tests));
+    // Xen kẽ theo VÒNG: mỗi vòng hỏi mỗi mục đúng 1 câu → hai câu cùng một mục
+    // không bao giờ liền kề, và độ khó tăng dần qua từng vòng.
+    const perItem = items.map(buildTestsFor);
+    const rounds = [];
+    for (let r = 0; r < 3; r++) rounds.push(shuffle(perItem.map(list => list[r]).filter(Boolean)));
+    LS.queue = items.map(v => ({ type: 'present', v })).concat(...rounds);
     LS.bi++;
     renderLearnTurn();
   }
@@ -984,15 +1084,27 @@ const App = (() => {
       </div>`;
   }
 
+  // Phương án nhiễu: ưu tiên lỗi sai THẬT người học từng gõ cho chính mục này,
+  // sau đó mới lấy các mục cùng chủ đề (nhiễu ngẫu nhiên dạy được rất ít).
   function mcOptions(v, key) {
-    const others = shuffle(LS.pool.filter(x => x.w !== v.w)).slice(0, 3);
-    return shuffle([v, ...others]).map(x => ({ text: x[key], ok: x.w === v.w }));
+    const opts = [{ text: v[key], ok: true }];
+    if (key === 'w') {
+      const mine = (S.mistakes[v.tid + '|' + v.w] || []).filter(m => norm(m) !== norm(v.w));
+      if (mine.length) opts.push({ text: mine[0], ok: false });
+    }
+    const others = shuffle(LS.pool.filter(x => x.w !== v.w && norm(x[key]) !== norm(v[key])));
+    for (const o of others) {
+      if (opts.length >= 4) break;
+      if (!opts.some(x => norm(x.text) === norm(o[key]))) opts.push({ text: o[key], ok: false });
+    }
+    return shuffle(opts);          // xáo thật ngẫu nhiên, tránh học vẹt vị trí đáp án
   }
 
   function renderLearnTurn() {
     const t = LS.queue[0];
     if (!t) return nextBatch();
     const v = t.v;
+    LS.tStart = Date.now();          // bấm giờ để suy ra mức độ chắc chắn khi trả lời
 
     if (t.type === 'present') {
       main().innerHTML = `${learnProgress()}
@@ -1151,7 +1263,7 @@ const App = (() => {
   function learnCheckType() {
     const v = LS.queue[0].v;
     const val = document.getElementById('learn-input').value;
-    showLearnFeedback(norm(val) === norm(v.w), v);
+    showLearnFeedback(norm(val) === norm(v.w), v, false, val);   // lưu cả cách gõ sai
   }
 
   function learnAnswer(i, ok) {
@@ -1164,9 +1276,9 @@ const App = (() => {
     showLearnFeedback(ok, v, true);
   }
 
-  function showLearnFeedback(ok, v, silent) {
+  function showLearnFeedback(ok, v, silent, userAnswer) {
     const fb = document.getElementById('learn-fb');
-    recordLearn(ok, v);
+    recordLearn(ok, v, userAnswer);
     if (fb) {
       fb.className = 'learn-fb ' + (ok ? 'good' : 'bad');
       fb.innerHTML = ok
@@ -1177,19 +1289,22 @@ const App = (() => {
     setTimeout(() => { LS.queue.shift(); renderLearnTurn(); }, ok ? 900 : 2300);
   }
 
-  function recordLearn(ok, v) {
+  function recordLearn(ok, v, userAnswer) {
     const key = v.tid + '|' + v.w;
+    const type = (LS.queue[0] || {}).type || 'mc_word';
+    const ms = LS.tStart ? Date.now() - LS.tStart : 6000;
+    gradeItem(key, ok, ms, type, userAnswer);
     if (ok) {
       LS.learned.add(v.w);
-      if (S.weak[key]) { if (--S.weak[key] <= 0) delete S.weak[key]; }
     } else {
       LS.wrong++;
       LS.learned.delete(v.w);
-      S.weak[key] = (S.weak[key] || 0) + 1;
-      // trả lời sai → cho gặp lại từ này ở cuối hàng đợi
-      LS.queue.push({ type: 'mc', v, mode: 'meaning' });
+      // Sai → gặp lại NGAY TRONG PHIÊN: lần 1 chèn sau 3 câu, lần 2 sau 5 câu, lần 3 xuống cuối
+      LS.tries[key] = (LS.tries[key] || 0) + 1;
+      const n = LS.tries[key];
+      const pos = n === 1 ? 3 : n === 2 ? 5 : LS.queue.length;
+      LS.queue.splice(Math.min(pos, LS.queue.length), 0, { type: easierType(v), v });
     }
-    S.quizStats.total++; if (ok) S.quizStats.correct++;
     save();
   }
 
@@ -1203,6 +1318,12 @@ const App = (() => {
     markDone(LS.dayIdx);
     LS.topicIds.forEach(addTopicToSrs);
     const total = LS.items.length;
+    // Đếm từ mới trong ngày — học dồn quá nhiều hôm nay = ngày mai ôn ngập đầu
+    const td = todayStr();
+    if (S.newToday.d !== td) S.newToday = { d: td, n: 0 };
+    S.newToday.n += total;
+    save();
+    const over = S.newToday.n > NEW_SOFT_CAP;
     const cur = currentDayIdx();
     main().innerHTML = `
       <div class="quiz-box" style="text-align:center;padding-top:40px;margin:0 auto">
@@ -1210,8 +1331,11 @@ const App = (() => {
         <div class="view-title">Hoàn thành buổi học!</div>
         <p style="color:var(--muted);margin:10px 0 24px">
           Bạn đã học <b style="color:var(--text)">${total}</b> từ &amp; cụm giao tiếp${LS.wrong ? `, sai ${LS.wrong} lần (đã ghi nhớ để ôn thêm)` : ' — không sai lần nào! 👏'}.<br>
-          Tất cả đã vào bộ flashcard, hệ thống sẽ tự nhắc bạn ôn đúng lúc.
+          Lần ôn đầu tiên sẽ đến <b style="color:var(--green)">sau khoảng 10 phút</b>, rồi 4 giờ, rồi 1 ngày…
         </p>
+        ${over ? `<p style="color:var(--yellow);font-size:13.5px;margin:-10px 0 18px">
+          ⚠️ Hôm nay bạn đã học ${S.newToday.n} từ mới. Học thêm nữa thì ngày mai sẽ có rất nhiều thẻ ôn dồn về —
+          nên dừng ở đây và dành thời gian ôn lại thì nhớ chắc hơn.</p>` : ''}
         ${cur !== -1
           ? `<button class="btn btn-primary btn-lg" style="max-width:340px" onclick="App.go('day',${cur})">Học tiếp ngày sau →</button>`
           : `<button class="btn btn-primary btn-lg" style="max-width:340px" onclick="App.go('dashboard')">🎓 Xem tổng kết</button>`}
@@ -1300,6 +1424,7 @@ const App = (() => {
           </div>
         </div>
       </div>`;
+    qs.tStart = Date.now();
     if (q.auto) setTimeout(() => speak(q.listen), 350);
   }
 
@@ -1312,16 +1437,11 @@ const App = (() => {
     const ok = i === q.a;
     if (!ok) opts[i].classList.add('wrong');
     else qs.correct++;
-    S.quizStats.total++; if (ok) S.quizStats.correct++;
-    // Ôn tập thích ứng: ghi nhận đúng/sai từng mục
+    // Ôn tập thích ứng: cập nhật lịch ôn theo đúng/sai + thời gian trả lời
     if (q.item) {
-      const key = q.item.tid + '|' + q.item.w;
-      if (ok) {
-        if (S.weak[key]) { if (--S.weak[key] <= 0) delete S.weak[key]; }
-      } else {
-        S.weak[key] = (S.weak[key] || 0) + 1;
-        S.srs[key] = { box: 0, due: todayStr() };   // sai → ôn lại ngay trong flashcard
-      }
+      gradeItem(q.item.tid + '|' + q.item.w, ok, qs.tStart ? Date.now() - qs.tStart : 6000, 'mc_word');
+    } else {
+      S.quizStats.total++; if (ok) S.quizStats.correct++;
     }
     save();
     setTimeout(() => {
@@ -1417,19 +1537,28 @@ const App = (() => {
   let testOutStage = null;
 
   // ---------- Flashcards (SRS) ----------
-  let fcQueue = [], fcFlipped = false;
+  let fcQueue = [], fcFlipped = false, fcStart = 0, fcOverflow = 0;
 
   function renderFlashcards() {
-    fcQueue = shuffle(dueCards());
+    const all = dueCards();
+    // Ưu tiên thẻ khó + quá hạn lâu nhất, và chỉ lấy tối đa REVIEW_CAP mỗi phiên.
+    // Nếu dồn 200 thẻ mà bắt ôn hết, người học sẽ bỏ app (bẫy "cục review dồn").
+    const sorted = all.slice().sort((a, b) => (b.card.hard ? 1 : 0) - (a.card.hard ? 1 : 0));
+    fcQueue = sorted.slice(0, REVIEW_CAP);
+    fcOverflow = all.length - fcQueue.length;
     if (fcQueue.length === 0) {
       const total = Object.keys(S.srs).length;
+      const next = Object.values(S.srs).map(c => c.due || 0).filter(d => d > Date.now()).sort((a, b) => a - b)[0];
+      const inMin = next ? Math.round((next - Date.now()) / 60000) : 0;
+      const when = !next ? '' : inMin < 60 ? `khoảng ${inMin} phút nữa`
+        : inMin < 1440 ? `khoảng ${Math.round(inMin / 60)} giờ nữa` : `khoảng ${Math.round(inMin / 1440)} ngày nữa`;
       main().innerHTML = `
         <div class="view-title">🃏 Flashcard ôn tập</div>
-        <div class="view-sub">Ôn tập ngắt quãng (spaced repetition) — hệ thống tự lên lịch ngày ôn cho từng từ.</div>
+        <div class="view-sub">Ôn tập ngắt quãng — hệ thống tự tính thời điểm ôn cho từng từ (10 phút → 4 giờ → 24 giờ → nhiều ngày).</div>
         <div class="empty-note">
           ${total === 0
             ? 'Chưa có thẻ nào. Hãy hoàn thành bài học đầu tiên trong lộ trình,<br>từ vựng sẽ tự động được thêm vào đây.'
-            : `✨ Tuyệt vời! Không có thẻ nào đến hạn hôm nay.<br>Tổng cộng ${total} từ đang trong bộ nhớ. Quay lại vào ngày mai nhé!`}
+            : `✨ Tuyệt vời! Không còn thẻ nào đến hạn.<br>${total} từ đang trong bộ nhớ${when ? ` · thẻ tiếp theo đến hạn ${when}` : ''}.`}
         </div>`;
       return;
     }
@@ -1440,16 +1569,22 @@ const App = (() => {
     if (fcQueue.length === 0) {
       main().innerHTML = `
         <div class="view-title">🃏 Flashcard ôn tập</div>
-        <div class="empty-note">🎉 Đã ôn xong tất cả thẻ đến hạn hôm nay!<br>Từ nào bạn "Chưa nhớ" sẽ quay lại vào ngày mai.</div>
-        <div style="text-align:center"><button class="btn btn-primary" onclick="App.go('dashboard')">Về tổng quan</button></div>`;
+        <div class="empty-note">🎉 Đã ôn xong phiên này!${fcOverflow > 0
+          ? `<br>Còn ${fcOverflow} thẻ quá hạn — bấm "Ôn tiếp" nếu bạn còn thời gian.`
+          : '<br>Thẻ bạn trả lời sai sẽ quay lại sau 10 phút.'}</div>
+        <div style="text-align:center;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          ${fcOverflow > 0 ? '<button class="btn btn-primary" onclick="App.go(\'flashcards\')">Ôn tiếp →</button>' : ''}
+          <button class="btn btn-outline" onclick="App.go('dashboard')">Về tổng quan</button>
+        </div>`;
       touchStreak();
       return;
     }
     fcFlipped = false;
-    const { v } = fcQueue[0];
+    fcStart = Date.now();
+    const { v, card } = fcQueue[0];
     main().innerHTML = `
       <div class="view-title">🃏 Flashcard ôn tập</div>
-      <div class="view-sub">Nhấn vào thẻ để lật · còn ${fcQueue.length} thẻ</div>
+      <div class="view-sub">Nhấn vào thẻ để lật · còn ${fcQueue.length} thẻ${card.hard ? ' · <b style="color:var(--yellow)">⚠️ từ khó</b>' : ''}${fcOverflow > 0 ? ` · ${fcOverflow} thẻ chờ phiên sau` : ''}</div>
       <div class="fc-stage">
         <div class="flashcard" id="fc" onclick="App.flipCard()">
           <div class="fc-inner">
@@ -1479,15 +1614,14 @@ const App = (() => {
   }
 
   function gradeCard(remembered) {
-    const { key, card } = fcQueue.shift();
-    if (remembered) card.box = Math.min(card.box + 1, SRS_INTERVALS.length - 1);
-    else card.box = 0;
-    const d = new Date();
-    d.setDate(d.getDate() + SRS_INTERVALS[card.box]);
-    // Thẻ "đã nhớ" ở hộp 0 vẫn nghỉ ít nhất 1 ngày
-    if (remembered && SRS_INTERVALS[card.box] === 0) d.setDate(d.getDate() + 1);
-    card.due = fmtDate(d);
-    S.srs[key] = card;
+    const { key } = fcQueue.shift();
+    const ms = fcStart ? Date.now() - fcStart : 6000;
+    const c = gradeItem(key, remembered, ms, 'flashcard');
+    // Sai → thẻ quay lại NGAY trong phiên này (sau 3 thẻ khác), không đợi ngày mai
+    if (!remembered) {
+      const again = dueCards().find(x => x.key === key);
+      if (again) fcQueue.splice(Math.min(3, fcQueue.length), 0, again);
+    }
     save();
     renderFcCard();
   }

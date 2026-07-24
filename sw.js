@@ -1,6 +1,6 @@
 // Service worker: cho phép cài đặt PWA, chạy offline và hiển thị thông báo
-const CACHE = 'englishdaily-v12';
-const ASSET_V = '12';                 // phải khớp với ?v= trong index.html
+const CACHE = 'englishdaily-v13';
+const ASSET_V = '13';                 // phải khớp với ?v= trong index.html
 const SHELL = [
   './',
   './index.html',
@@ -113,7 +113,7 @@ self.addEventListener('notificationclick', e => {
     e.waitUntil(gradeCard(d, act === 'know').then(() => {
       if (act === 'forgot') {   // quên thì cho xem lại nghĩa để nhớ thêm
         return self.registration.showNotification(`📖 ${d.word || ''} = ${d.meaning || ''}`, {
-          body: d.ex ? `"${d.ex}"\nĐã xếp lịch ôn lại vào ngày mai 💪` : 'Đã xếp lịch ôn lại vào ngày mai 💪',
+          body: d.ex ? `"${d.ex}"\nSẽ cho bạn gặp lại từ này sau ít phút nữa 💪` : 'Sẽ cho bạn gặp lại từ này sau ít phút nữa 💪',
           icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'englishdaily-push', data: {},
         });
       }
