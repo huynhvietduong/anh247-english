@@ -832,10 +832,13 @@ const App = (() => {
   }
 
   function renderLesson(dayIdx, topicIds, tab) {
+    // Tab 0 = buổi học tương tác (mặc định). Các tab sau chỉ để TRA CỨU lại.
+    if (tab === 0) { startLearnSession(dayIdx, topicIds); return; }
+    tab -= 1;
     const ts = topicIds.map(topicById);
-    const tabNames = ['📖 Từ vựng', '🗣️ Cụm giao tiếp', '💬 Mẫu câu', '🎭 Hội thoại', '✅ Quiz'];
+    const tabNames = ['🎓 Học', '📖 Từ vựng', '🗣️ Cụm giao tiếp', '💬 Mẫu câu', '🎭 Hội thoại'];
     const tabsHtml = tabNames.map((n, k) =>
-      `<button class="tab ${k === tab ? 'active' : ''}" onclick="App.lessonTab(${dayIdx},${k})">${n}</button>`).join('');
+      `<button class="tab ${k === tab + 1 ? 'active' : ''}" onclick="App.lessonTab(${dayIdx},${k})">${n}</button>`).join('');
 
     let body = '';
     if (tab === 0) {
@@ -886,9 +889,6 @@ const App = (() => {
               </div>
             </div>`).join('')}
         </div>`).join('');
-    } else {
-      startQuiz(dayIdx, buildTopicQuiz(topicIds), null, false, topicIds);
-      return;
     }
 
     main().innerHTML = `
@@ -897,9 +897,11 @@ const App = (() => {
         <div class="view-title" style="margin:0;font-size:22px">Ngày ${dayIdx + 1}: ${ts.map(t => t.name).join(' + ')}</div>
       </div>
       <div class="tabs">${tabsHtml}</div>
+      <div class="ref-note">📚 Đây là phần tra cứu. Muốn <b>học và nhớ thật</b>, hãy vào tab <b>🎓 Học</b> để luyện tương tác.</div>
       ${body}
-      <div style="margin-top:24px">
-        ${tab < 4 ? `<button class="btn btn-primary" onclick="App.lessonTab(${dayIdx},${tab + 1})">Tiếp theo: ${tabNames[tab + 1]} →</button>` : ''}
+      <div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="App.lessonTab(${dayIdx},0)">🎓 Bắt đầu học tương tác</button>
+        ${tab < 3 ? `<button class="btn btn-outline" onclick="App.lessonTab(${dayIdx},${tab + 2})">${tabNames[tab + 2]} →</button>` : ''}
       </div>`;
   }
 
@@ -919,8 +921,225 @@ const App = (() => {
     });
   }
 
-  // ---------- Quiz ----------
   function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+  // ============================================================
+  // HỌC CHỦ ĐỘNG (kiểu Memrise): không đọc danh sách — mỗi từ đi qua
+  // chuỗi bài tập tăng dần độ khó, sai thì lặp lại tới khi thuộc.
+  // Học theo từng nhóm 4 từ: giới thiệu → kiểm tra xen kẽ → nhóm tiếp theo.
+  // ============================================================
+  let LS = null;          // phiên học hiện tại
+  const BATCH = 4;
+
+  const norm = s => String(s).toLowerCase().replace(/[.,!?"'’‘“”]/g, '').replace(/\s+/g, ' ').trim();
+
+  function startLearnSession(dayIdx, topicIds) {
+    const pool = poolOf(topicIds);
+    LS = {
+      dayIdx, topicIds, pool,
+      items: shuffle(pool),
+      bi: 0, queue: [], done: 0, wrong: 0,
+      learned: new Set(),
+    };
+    nextBatch();
+  }
+
+  function nextBatch() {
+    const items = LS.items.slice(LS.bi * BATCH, (LS.bi + 1) * BATCH);
+    if (!items.length) return finishLearn();
+    // Giới thiệu từng từ, rồi trộn các bài kiểm tra của cả nhóm
+    const tests = [];
+    items.forEach(v => {
+      tests.push({ type: 'mc', v, mode: 'meaning' });                       // nhận diện nghĩa
+      tests.push({ type: 'listen', v });                                    // nghe hiểu
+      tests.push({ type: v.w.includes(' ') ? 'scramble' : 'type', v });     // tự sản sinh
+    });
+    LS.queue = items.map(v => ({ type: 'present', v })).concat(shuffle(tests));
+    LS.bi++;
+    renderLearnTurn();
+  }
+
+  function learnProgress() {
+    const total = LS.items.length;
+    const pct = Math.round(LS.learned.size / total * 100);
+    return `<div class="learn-top">
+        <button class="back" onclick="App.go('roadmap')">← Thoát</button>
+        <div class="learn-bar"><div style="width:${pct}%"></div></div>
+        <div class="learn-count">${LS.learned.size}/${total}</div>
+      </div>`;
+  }
+
+  function mcOptions(v, key) {
+    const others = shuffle(LS.pool.filter(x => x.w !== v.w)).slice(0, 3);
+    return shuffle([v, ...others]).map(x => ({ text: x[key], ok: x.w === v.w }));
+  }
+
+  function renderLearnTurn() {
+    const t = LS.queue[0];
+    if (!t) return nextBatch();
+    const v = t.v;
+
+    if (t.type === 'present') {
+      main().innerHTML = `${learnProgress()}
+        <div class="learn-stage">
+          <div class="learn-tag">✨ Từ mới</div>
+          <div class="present-card">
+            <div class="pc-word">${esc(v.w)}</div>
+            ${v.ipa ? `<div class="pc-ipa">${esc(v.ipa)}</div>` : ''}
+            <button class="btn btn-outline btn-sm" onclick="App.speak('${js(v.w)}')">🔊 Nghe lại</button>
+            <div class="pc-mean">${esc(v.m)}</div>
+            <div class="pc-ex">"${esc(v.ex)}" <button class="speak-btn" style="font-size:12px" onclick="App.speak('${js(v.ex)}')">🔊</button></div>
+          </div>
+          <button class="btn btn-primary btn-lg" style="max-width:420px" onclick="App.learnNext()">Tôi đã nhớ, tiếp tục →</button>
+        </div>`;
+      setTimeout(() => speak(v.w), 250);
+      return;
+    }
+
+    if (t.type === 'mc' || t.type === 'listen') {
+      const listen = t.type === 'listen';
+      const opts = listen ? mcOptions(v, 'w') : mcOptions(v, 'w');
+      const q = listen ? '🔊 Bạn vừa nghe từ/cụm nào?' : `Chọn từ/cụm có nghĩa: <b>“${esc(v.m)}”</b>`;
+      main().innerHTML = `${learnProgress()}
+        <div class="learn-stage">
+          <div class="learn-tag">${listen ? '👂 Nghe hiểu' : '🧠 Nhận diện'}</div>
+          <div class="learn-q">${q}
+            ${listen ? `<button class="speak-btn" onclick="App.speak('${js(v.w)}')">🔊</button>` : ''}</div>
+          <div class="quiz-opts" id="learn-opts">
+            ${opts.map((o, i) => `<button class="opt" onclick="App.learnAnswer(${i},${o.ok})">${esc(o.text)}</button>`).join('')}
+          </div>
+        </div>`;
+      if (listen) setTimeout(() => speak(v.w), 300);
+      return;
+    }
+
+    if (t.type === 'type') {
+      main().innerHTML = `${learnProgress()}
+        <div class="learn-stage">
+          <div class="learn-tag">⌨️ Tự viết</div>
+          <div class="learn-q">Gõ từ tiếng Anh có nghĩa: <b>“${esc(v.m)}”</b></div>
+          <input id="learn-input" class="learn-input" type="text" autocomplete="off" autocapitalize="off"
+                 spellcheck="false" placeholder="Gõ tại đây…">
+          <div class="learn-hint">Gợi ý: ${v.w.length} chữ cái, bắt đầu bằng “${esc(v.w[0])}”</div>
+          <div id="learn-fb" class="learn-fb"></div>
+          <button class="btn btn-primary btn-lg" style="max-width:420px" onclick="App.learnCheckType()">Kiểm tra</button>
+        </div>`;
+      const inp = document.getElementById('learn-input');
+      inp.focus();
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') learnCheckType(); });
+      return;
+    }
+
+    // scramble: ghép các từ thành câu đúng thứ tự
+    const words = v.w.split(/\s+/);
+    LS.scrambled = shuffle(words.map((w, i) => ({ w, i })));
+    LS.picked = [];
+    renderScramble(v);
+  }
+
+  function renderScramble(v) {
+    main().innerHTML = `${learnProgress()}
+      <div class="learn-stage">
+        <div class="learn-tag">🧩 Ghép câu</div>
+        <div class="learn-q">Sắp xếp thành cụm có nghĩa: <b>“${esc(v.m)}”</b></div>
+        <div class="scr-answer" id="scr-answer">${LS.picked.map((p, i) =>
+          `<button class="scr-tile picked" onclick="App.learnUnpick(${i})">${esc(p.w)}</button>`).join('') ||
+          '<span class="scr-empty">Chạm vào các từ bên dưới…</span>'}</div>
+        <div class="scr-bank">${LS.scrambled.map((p, i) =>
+          `<button class="scr-tile" onclick="App.learnPick(${i})">${esc(p.w)}</button>`).join('')}</div>
+        <div id="learn-fb" class="learn-fb"></div>
+        <button class="btn btn-primary btn-lg" style="max-width:420px" onclick="App.learnCheckScramble()">Kiểm tra</button>
+      </div>`;
+  }
+
+  function learnPick(i) {
+    LS.picked.push(LS.scrambled[i]);
+    LS.scrambled.splice(i, 1);
+    renderScramble(LS.queue[0].v);
+  }
+  function learnUnpick(i) {
+    LS.scrambled.push(LS.picked[i]);
+    LS.picked.splice(i, 1);
+    renderScramble(LS.queue[0].v);
+  }
+
+  function learnCheckScramble() {
+    const v = LS.queue[0].v;
+    const ok = norm(LS.picked.map(p => p.w).join(' ')) === norm(v.w);
+    showLearnFeedback(ok, v);
+  }
+
+  function learnCheckType() {
+    const v = LS.queue[0].v;
+    const val = document.getElementById('learn-input').value;
+    showLearnFeedback(norm(val) === norm(v.w), v);
+  }
+
+  function learnAnswer(i, ok) {
+    const btns = document.querySelectorAll('#learn-opts .opt');
+    btns.forEach(b => b.disabled = true);
+    btns.forEach(b => { if (norm(b.textContent) === norm(LS.queue[0].v.w)) b.classList.add('correct'); });
+    if (!ok) btns[i].classList.add('wrong');
+    showLearnFeedback(ok, LS.queue[0].v, true);
+  }
+
+  function showLearnFeedback(ok, v, silent) {
+    const fb = document.getElementById('learn-fb');
+    recordLearn(ok, v);
+    if (fb) {
+      fb.className = 'learn-fb ' + (ok ? 'good' : 'bad');
+      fb.innerHTML = ok
+        ? `✓ Chính xác! <b>${esc(v.w)}</b> = ${esc(v.m)}`
+        : `✗ Đáp án đúng: <b>${esc(v.w)}</b> = ${esc(v.m)}<br><span style="opacity:.8">"${esc(v.ex)}"</span>`;
+    }
+    if (ok) speak(v.w);
+    setTimeout(() => { LS.queue.shift(); renderLearnTurn(); }, ok ? 900 : 2300);
+  }
+
+  function recordLearn(ok, v) {
+    const key = v.tid + '|' + v.w;
+    if (ok) {
+      LS.learned.add(v.w);
+      if (S.weak[key]) { if (--S.weak[key] <= 0) delete S.weak[key]; }
+    } else {
+      LS.wrong++;
+      LS.learned.delete(v.w);
+      S.weak[key] = (S.weak[key] || 0) + 1;
+      // trả lời sai → cho gặp lại từ này ở cuối hàng đợi
+      LS.queue.push({ type: 'mc', v, mode: 'meaning' });
+    }
+    S.quizStats.total++; if (ok) S.quizStats.correct++;
+    save();
+  }
+
+  function learnNext() {
+    const t = LS.queue.shift();
+    if (t && t.type === 'present') LS.learned.add(t.v.w);
+    renderLearnTurn();
+  }
+
+  function finishLearn() {
+    markDone(LS.dayIdx);
+    LS.topicIds.forEach(addTopicToSrs);
+    const total = LS.items.length;
+    const cur = currentDayIdx();
+    main().innerHTML = `
+      <div class="quiz-box" style="text-align:center;padding-top:40px;margin:0 auto">
+        <div style="font-size:60px;margin-bottom:14px">🎉</div>
+        <div class="view-title">Hoàn thành buổi học!</div>
+        <p style="color:var(--muted);margin:10px 0 24px">
+          Bạn đã học <b style="color:var(--text)">${total}</b> từ &amp; cụm giao tiếp${LS.wrong ? `, sai ${LS.wrong} lần (đã ghi nhớ để ôn thêm)` : ' — không sai lần nào! 👏'}.<br>
+          Tất cả đã vào bộ flashcard, hệ thống sẽ tự nhắc bạn ôn đúng lúc.
+        </p>
+        ${cur !== -1
+          ? `<button class="btn btn-primary btn-lg" style="max-width:340px" onclick="App.go('day',${cur})">Học tiếp ngày sau →</button>`
+          : `<button class="btn btn-primary btn-lg" style="max-width:340px" onclick="App.go('dashboard')">🎓 Xem tổng kết</button>`}
+        <div><button class="btn btn-ghost" onclick="App.go('roadmap')">Về lộ trình</button></div>
+      </div>`;
+    LS = null;
+  }
+
+  // ---------- Quiz ----------
 
   // pool item mang theo tid (topic id) để chấm điểm yếu; makeQuestion gắn `item`
   const poolOf = ids => [...new Set(ids)].flatMap(id => vocabOf(topicById(id)).map(v => ({ ...v, tid: id })));
@@ -1848,5 +2067,6 @@ const App = (() => {
     installApp, toggleReminder, setReminderTime,
     authTab, authSubmit, logout, adminSetPass, adminResetUser, adminDeleteUser, togglePass,
     togglePush, setPushTime, doneMission, startTestOut, setMinutes,
+    learnNext, learnAnswer, learnCheckType, learnCheckScramble, learnPick, learnUnpick,
   };
 })();
