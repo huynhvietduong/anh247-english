@@ -644,3 +644,75 @@ input[type="time"]:focus{border-color:var(--primary)}
   .learn-stage > .btn-ghost:last-child{ margin-top:auto }
   .learn-stage .quiz-opts{ margin-bottom:auto }
 }
+
+/* ============================================================
+   BỐ CỤC GỌN — mỗi màn vừa 1 khung hình, hạn chế cuộn dài
+   ============================================================ */
+
+/* Đầu trang Tổng quan: lời chào + nút cài đặt cùng một hàng */
+.dash-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
+.icon-btn{
+  flex-shrink:0;width:42px;height:42px;border-radius:13px;font-size:19px;
+  background:var(--panel);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;transition:all .15s;
+}
+.icon-btn:hover{background:var(--panel2);border-color:var(--border-strong)}
+
+/* 4 chỉ số gộp thành MỘT dải thay vì 4 thẻ lớn (tiết kiệm ~200px chiều cao) */
+.quick-stats{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-bottom:14px;
+  background:var(--border);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;
+}
+.quick-stats > div{
+  background:rgba(255,255,255,.06);padding:12px 6px;text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+}
+.quick-stats b{font-size:19px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}
+.qs-ico{font-size:15px;line-height:1}
+.qs-lbl{font-size:10.5px;color:var(--muted);line-height:1.2}
+
+/* Hàng hành động một dòng thay cho panel to */
+.row-action{
+  width:100%;display:flex;align-items:center;gap:12px;text-align:left;
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:13px 15px;margin-bottom:11px;transition:all .15s;
+  -webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
+}
+button.row-action:hover{background:var(--panel2);border-color:var(--border-strong)}
+.row-action.mission{border-color:rgba(255,209,102,.34)}
+.row-action.mission.done{border-color:rgba(52,224,161,.42)}
+.ra-ico{font-size:21px;flex-shrink:0}
+.ra-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.ra-text b{font-size:14.5px;font-weight:700}
+.ra-text small{font-size:12.5px;color:var(--muted);line-height:1.45}
+.ra-go{flex-shrink:0;font-size:13.5px;font-weight:700;color:var(--cyan)}
+.ra-go.done{color:var(--green)}
+
+/* Chặng lộ trình dạng gấp/mở */
+.stage-head{width:100%;text-align:left;cursor:pointer;display:block}
+.stage-head:not(.open){padding:13px 16px}
+.stage-head:not(.open) .stage-title{font-size:15px}
+.stage-caret{color:var(--muted);font-size:14px;flex-shrink:0}
+.stage-meta{display:flex;align-items:center;gap:10px;margin-top:8px}
+.stage-meta .mini-bar{flex:1;margin-top:0}
+.stage-meta .td-sub{margin:0;flex-shrink:0;font-variant-numeric:tabular-nums}
+.stage-block{margin-bottom:14px}
+
+/* Thư viện chủ đề gọn hơn: nhiều thẻ hơn trên một màn */
+.topic-card{padding:14px 12px}
+.topic-card .t-ico{font-size:24px;margin-bottom:5px}
+.topic-card .t-name{font-size:13.5px;line-height:1.35}
+.topic-card .t-meta{font-size:11.5px}
+
+@media (max-width:760px){
+  .quick-stats b{font-size:17px}
+  .qs-lbl{font-size:10px}
+  .topic-grid{grid-template-columns:1fr 1fr;gap:9px}
+  .roadmap-grid{grid-template-columns:1fr 1fr;gap:9px}
+  .day-card{min-height:104px;padding:13px}
+  .day-card .d-name{font-size:12.5px}
+  .today-card{padding:18px 16px;margin-bottom:14px}
+  .today-card .t-title{font-size:18px}
+  .today-card .t-desc{font-size:13px}
+  .dash-head{margin-bottom:12px}
+}

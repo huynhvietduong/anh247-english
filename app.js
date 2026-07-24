@@ -567,6 +567,7 @@ const App = (() => {
     else if (view === 'speaking') renderSpeaking();
     else if (view === 'topics') renderTopics();
     else if (view === 'admin') renderAdmin();
+    else if (view === 'settings') renderSettings();
     else if (view === 'day') renderDay(arg);
     window.scrollTo(0, 0);
   }
@@ -743,67 +744,55 @@ const App = (() => {
       </div>`;
     }
 
-    // Study Plan — ước tính ngày hoàn thành theo số phút học mỗi ngày
+    const missionDone = !!S.missions[todayStr()];
+    // Tổng quan gói gọn trong 1 màn: lời chào → việc hôm nay → 4 số liệu → 2 dòng hành động.
+    // Cài đặt tách sang màn riêng (nút ⚙️) để không kéo dài trang.
+    main().innerHTML = `
+      <div class="dash-head">
+        <div>
+          <div class="view-title" style="margin-bottom:2px">Xin chào, ${esc(S.name)}! 👋</div>
+          <div class="view-sub" style="margin:0">Trình độ <b>${lvNames[S.level]}</b> · ${pct}% lộ trình${Object.keys(S.weak).length ? ` · 🎯 ${Object.keys(S.weak).length} mục cần ôn thêm` : ''}</div>
+        </div>
+        <button class="icon-btn" title="Cài đặt" onclick="App.go('settings')">⚙️</button>
+      </div>
+      ${todayHtml}
+      <div class="quick-stats">
+        <div><span class="qs-ico">🔥</span><b>${S.streak}</b><span class="qs-lbl">chuỗi ngày</span></div>
+        <div><span class="qs-ico">📖</span><b>${S.done.length}/${S.plan.length}</b><span class="qs-lbl">ngày học</span></div>
+        <div><span class="qs-ico">🧠</span><b>${words}</b><span class="qs-lbl">từ đang nhớ</span></div>
+        <div><span class="qs-ico">🎯</span><b>${acc}%</b><span class="qs-lbl">đúng quiz</span></div>
+      </div>
+      ${due > 0 ? `<button class="row-action" onclick="App.go('flashcards')">
+        <span class="ra-ico">🃏</span>
+        <span class="ra-text"><b>${due} thẻ đến hạn ôn</b><small>Ôn ngay để không quên</small></span>
+        <span class="ra-go">Ôn →</span>
+      </button>` : ''}
+      <div class="row-action mission ${missionDone ? 'done' : ''}">
+        <span class="ra-ico">🎯</span>
+        <span class="ra-text"><b>Thử thách đời thực</b><small>${esc(todayMission())}</small></span>
+        ${missionDone ? '<span class="ra-go done">✓ Xong</span>'
+          : '<button class="btn btn-green btn-sm" onclick="App.doneMission()">Đã làm ✓</button>'}
+      </div>
+    `;
+  }
+
+  // ---------- Cài đặt (màn riêng) ----------
+  function renderSettings() {
+    const cur = currentDayIdx();
     const remaining = S.plan.length - S.done.length;
     const perDay = Math.max(1, Math.round((S.minutesPerDay || 15) / 15));
-    const daysNeeded = Math.ceil(remaining / perDay);
-    const finish = new Date(); finish.setDate(finish.getDate() + daysNeeded);
+    const finish = new Date(); finish.setDate(finish.getDate() + Math.ceil(remaining / perDay));
     const finishStr = finish.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const planHtml = cur === -1 ? '' : `
-      <div class="panel">
-        <h3>📅 Kế hoạch học của bạn</h3>
-        <div class="set-row" style="border:none;padding-top:0">
-          <div>
-            <div class="set-name">Mỗi ngày bạn học khoảng</div>
-            <div class="set-desc">Còn <b>${remaining}</b> ngày học · dự kiến hoàn thành <b style="color:var(--green)">${finishStr}</b></div>
-          </div>
-          <div class="set-ctrl">
-            <select id="mpd" onchange="App.setMinutes(this.value)">
-              ${[5, 10, 15, 30, 45].map(m => `<option value="${m}" ${S.minutesPerDay === m ? 'selected' : ''}>${m} phút</option>`).join('')}
-            </select>
-          </div>
-        </div>
-      </div>`;
-
-    const missionDone = !!S.missions[todayStr()];
     main().innerHTML = `
-      <div class="view-title">Xin chào, ${esc(S.name)}! 👋</div>
-      <div class="view-sub">Trình độ: <b>${lvNames[S.level]}</b> · Mục tiêu: giao tiếp tiếng Anh hằng ngày</div>
-      ${todayHtml}
-      <div class="panel mission-card ${missionDone ? 'done' : ''}">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
-          <div style="flex:1;min-width:220px">
-            <h3 style="margin-bottom:6px">🎯 Thử thách đời thực hôm nay</h3>
-            <div style="font-size:14.5px;line-height:1.6">${esc(todayMission())}</div>
-          </div>
-          ${missionDone
-            ? '<span class="score-badge score-good">✓ Đã thực hiện</span>'
-            : '<button class="btn btn-green" onclick="App.doneMission()">Tôi đã làm ✓</button>'}
-        </div>
-      </div>
-      <div class="stat-grid">
-        <div class="stat-card"><div class="ico">🔥</div><div class="num">${S.streak}</div><div class="lbl">Chuỗi ngày học liên tiếp</div></div>
-        <div class="stat-card"><div class="ico">📖</div><div class="num">${S.done.length}/${S.plan.length}</div><div class="lbl">Ngày đã hoàn thành</div></div>
-        <div class="stat-card"><div class="ico">🧠</div><div class="num">${words}</div><div class="lbl">Từ vựng đang ghi nhớ</div></div>
-        <div class="stat-card"><div class="ico">🎯</div><div class="num">${acc}%</div><div class="lbl">Độ chính xác quiz</div></div>
+      <div class="lesson-head">
+        <button class="back" onclick="App.go('dashboard')">← Tổng quan</button>
+        <div class="view-title" style="margin:0;font-size:22px">⚙️ Cài đặt</div>
       </div>
       <div class="panel">
-        <h3>Tiến độ lộ trình</h3>
-        <div class="progress-line"><div class="fill" style="width:${pct}%"></div></div>
-        <div style="color:var(--muted);font-size:13.5px">${pct}% hoàn thành${Object.keys(S.weak).length ? ` · 🎯 ${Object.keys(S.weak).length} mục đang cần ôn thêm` : ''}</div>
-      </div>
-      ${planHtml}
-      ${due > 0 ? `<div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
-        <div><h3 style="margin-bottom:4px">🃏 Có ${due} thẻ từ vựng đến hạn ôn</h3>
-        <div style="color:var(--muted);font-size:13.5px">Ôn ngay để không quên những gì đã học.</div></div>
-        <button class="btn btn-outline" onclick="App.go('flashcards')">Ôn ngay</button>
-      </div>` : ''}
-      <div class="panel">
-        <h3>⚙️ Cài đặt</h3>
         <div class="set-row">
           <div>
             <div class="set-name">📣 Bài học tự đến qua thông báo</div>
-            <div class="set-desc">Máy chủ gửi từ vựng &amp; mẫu câu của bạn theo 3 khung giờ — <b>app đóng vẫn nhận được</b>.</div>
+            <div class="set-desc">Máy chủ gửi từ vựng theo 3 khung giờ — <b>app đóng vẫn nhận được</b>.</div>
           </div>
           <div class="set-ctrl" style="flex-wrap:wrap">
             <input type="time" value="${S.push.times[0]}" onchange="App.setPushTime(0,this.value)">
@@ -815,36 +804,46 @@ const App = (() => {
         <div class="set-row">
           <div>
             <div class="set-name">🔔 Nhắc học khi đang mở app</div>
-            <div class="set-desc">Nhắc nhẹ nếu đến giờ mà hôm nay bạn chưa học (chạy trong app).</div>
+            <div class="set-desc">Nhắc nhẹ nếu đến giờ mà hôm nay bạn chưa học.</div>
           </div>
           <div class="set-ctrl">
             <input type="time" id="remind-time" value="${S.reminder.time}" onchange="App.setReminderTime(this.value)">
             <button class="btn btn-sm ${S.reminder.enabled ? 'btn-green' : 'btn-outline'}" id="btn-remind" onclick="App.toggleReminder()">${S.reminder.enabled ? '✓ Đang bật' : 'Bật'}</button>
           </div>
         </div>
+        ${cur === -1 ? '' : `<div class="set-row">
+          <div>
+            <div class="set-name">📅 Mỗi ngày học khoảng</div>
+            <div class="set-desc">Còn <b>${remaining}</b> ngày · dự kiến xong <b style="color:var(--green)">${finishStr}</b></div>
+          </div>
+          <div class="set-ctrl">
+            <select id="mpd" onchange="App.setMinutes(this.value)">
+              ${[5, 10, 15, 30, 45].map(m => `<option value="${m}" ${S.minutesPerDay === m ? 'selected' : ''}>${m} phút</option>`).join('')}
+            </select>
+          </div>
+        </div>`}
         <div class="set-row" id="install-row" style="display:${installEvt ? 'flex' : 'none'}">
           <div>
             <div class="set-name">📲 Cài đặt lên thiết bị</div>
-            <div class="set-desc">Thêm EnglishDaily vào màn hình chính, mở như app thật.</div>
+            <div class="set-desc">Thêm vào màn hình chính, mở như app thật.</div>
           </div>
           <div class="set-ctrl"><button class="btn btn-sm btn-outline" onclick="App.installApp()">Cài đặt</button></div>
         </div>
-        <div class="set-row only-mobile">
+        <div class="set-row">
+          <div>
+            <div class="set-name">👤 Tài khoản: ${esc(CURRENT || '')}</div>
+            <div class="set-desc">Tiến độ đồng bộ trên mọi thiết bị của bạn.</div>
+          </div>
+          <div class="set-ctrl"><button class="btn btn-sm btn-outline" onclick="App.logout()">Đăng xuất</button></div>
+        </div>
+        <div class="set-row">
           <div>
             <div class="set-name">🔄 Làm lại từ đầu</div>
             <div class="set-desc">Xóa tiến độ và làm lại kiểm tra đầu vào.</div>
           </div>
-          <div class="set-ctrl"><button class="btn btn-sm btn-outline" onclick="App.resetAll()">Đặt lại</button></div>
+          <div class="set-ctrl"><button class="btn btn-sm btn-outline btn-danger" onclick="App.resetAll()">Đặt lại</button></div>
         </div>
-        <div class="set-row only-mobile">
-          <div>
-            <div class="set-name">👤 Tài khoản: ${esc(CURRENT || '')}</div>
-            <div class="set-desc">Đăng xuất để đổi người học trên thiết bị này.</div>
-          </div>
-          <div class="set-ctrl"><button class="btn btn-sm btn-outline" onclick="App.logout()">Đăng xuất</button></div>
-        </div>
-      </div>
-    `;
+      </div>`;
   }
 
   // ---------- Lộ trình ----------
@@ -879,30 +878,41 @@ const App = (() => {
       const pct = Math.round(doneN / total * 100);
       const isDone = doneN === total;
       const isCurrent = si === curStage && !isDone;
-      const cards = idxs.map(i => dayCardHtml(S.plan[i], i, cur)).join('');
+      // Chỉ MỞ chặng đang xem — các chặng khác gấp lại để trang không dài lê thê
+      const open = (openStage === null ? isCurrent : openStage === si);
+      const cards = open ? idxs.map(i => dayCardHtml(S.plan[i], i, cur)).join('') : '';
       let header = '';
       if (st) {
-        const canTestOut = isCurrent;
-        header = `<div class="stage-head" style="--sc:${st.color}">
+        header = `<button class="stage-head ${open ? 'open' : ''}" style="--sc:${st.color}" onclick="App.toggleStage(${si})">
           <div class="stage-head-top">
             <div class="stage-title">${st.icon} Chặng ${si + 1}: ${st.name}
-              <span class="stage-en">${st.en}</span>
-              ${isDone ? '<span class="stage-badge">✓ Hoàn thành</span>' : isCurrent ? '<span class="stage-badge cur">Đang học</span>' : ''}
+              ${isDone ? '<span class="stage-badge">✓ Xong</span>' : isCurrent ? '<span class="stage-badge cur">Đang học</span>' : ''}
             </div>
-            ${canTestOut ? `<button class="btn btn-sm btn-outline" onclick="App.startTestOut(${si})">🎓 Thi vượt chặng</button>` : ''}
+            <span class="stage-caret">${open ? '▾' : '▸'}</span>
           </div>
-          <div class="stage-goal">🎯 Học xong bạn có thể: ${esc(st.goal)}</div>
-          <div class="mini-bar" style="margin-top:8px"><div style="width:${pct}%;background:${st.color}"></div></div>
-          <div class="td-sub" style="margin-top:4px">${doneN}/${total} ngày</div>
-        </div>`;
+          <div class="stage-meta">
+            <div class="mini-bar"><div style="width:${pct}%;background:${st.color}"></div></div>
+            <span class="td-sub">${doneN}/${total}</span>
+          </div>
+          ${open ? `<div class="stage-goal">🎯 Học xong bạn có thể: ${esc(st.goal)}</div>` : ''}
+        </button>`;
       }
-      return `<div class="stage-block ${isCurrent ? 'active' : ''}">${header}<div class="roadmap-grid">${cards}</div></div>`;
+      const testOut = (open && isCurrent)
+        ? `<button class="btn btn-sm btn-outline" style="margin-bottom:12px" onclick="App.startTestOut(${si})">🎓 Thi vượt chặng này</button>` : '';
+      return `<div class="stage-block ${isCurrent ? 'active' : ''}">${header}${testOut}
+        ${open ? `<div class="roadmap-grid">${cards}</div>` : ''}</div>`;
     }).join('');
 
     main().innerHTML = `
-      <div class="view-title">🗺️ Lộ trình ${S.plan.length} ngày</div>
-      <div class="view-sub">${STAGES.length} chặng theo mục tiêu giao tiếp. Hoàn thành mỗi ngày để mở khóa ngày tiếp theo — hoặc <b>thi vượt chặng</b> nếu bạn đã vững.</div>
+      <div class="view-title" style="margin-bottom:4px">🗺️ Lộ trình ${S.plan.length} ngày</div>
+      <div class="view-sub" style="margin-bottom:18px">${STAGES.length} chặng · chạm vào tên chặng để mở/gấp</div>
       ${html}`;
+  }
+
+  let openStage = null;   // null = tự mở chặng đang học
+  function toggleStage(si) {
+    openStage = (openStage === null ? currentStage() : openStage) === si ? -1 : si;
+    renderRoadmap();
   }
 
   // ---------- Ngày học ----------
@@ -1745,20 +1755,42 @@ const App = (() => {
   }
 
   // ---------- Thư viện chủ đề ----------
+  let openTopicGroup = null;   // null = mở nhóm của chặng đang học
+
   function renderTopics() {
-    const lvName = { 1: 'Cơ bản', 2: 'Sơ trung', 3: 'Trung cấp' };
-    main().innerHTML = `
-      <div class="view-title">📚 Thư viện chủ đề</div>
-      <div class="view-sub">Xem trước hoặc ôn lại bất kỳ chủ đề nào (không tính vào lộ trình).</div>
-      <div class="topic-grid">
-        ${TOPICS.map((t, i) => `
-          <button class="topic-card" onclick="App.openTopic('${t.id}')">
-            <div class="t-ico">${t.icon}</div>
-            <div class="t-name">${t.name}</div>
-            <div class="t-meta">${t.vocab.length} từ vựng · ${(t.chunks || []).length} cụm giao tiếp · ${t.phrases.length} mẫu câu</div>
-            <span class="lvl-badge lvl-${t.level}">${lvName[t.level]}</span>
-          </button>`).join('')}
+    const curSt = currentStage();
+    const cardsOf = list => `<div class="topic-grid">${list.map(t => `
+      <button class="topic-card" onclick="App.openTopic('${t.id}')">
+        <div class="t-ico">${t.icon}</div>
+        <div class="t-name">${t.name}</div>
+        <div class="t-meta">${t.vocab.length} từ · ${(t.chunks || []).length} cụm</div>
+      </button>`).join('')}</div>`;
+
+    // Nhóm theo chặng, chỉ mở 1 nhóm để trang không dài quá
+    const groups = STAGES.map((st, si) => {
+      const list = st.topics.map(topicById).filter(Boolean);
+      const open = (openTopicGroup === null ? si === curSt : openTopicGroup === si);
+      return `<div class="stage-block">
+        <button class="stage-head ${open ? 'open' : ''}" style="--sc:${st.color}" onclick="App.toggleTopicGroup(${si})">
+          <div class="stage-head-top">
+            <div class="stage-title">${st.icon} ${st.name}</div>
+            <span class="stage-caret">${open ? '▾' : '▸'}</span>
+          </div>
+          <div class="stage-meta"><span class="td-sub">${list.length} chủ đề</span></div>
+        </button>
+        ${open ? cardsOf(list) : ''}
       </div>`;
+    }).join('');
+
+    main().innerHTML = `
+      <div class="view-title" style="margin-bottom:4px">📚 Thư viện chủ đề</div>
+      <div class="view-sub" style="margin-bottom:18px">${TOPICS.length} chủ đề · chạm tên nhóm để mở/gấp</div>
+      ${groups}`;
+  }
+
+  function toggleTopicGroup(si) {
+    openTopicGroup = (openTopicGroup === null ? currentStage() : openTopicGroup) === si ? -1 : si;
+    renderTopics();
   }
 
   function openTopic(id) {
@@ -2287,7 +2319,7 @@ const App = (() => {
     openTopic, freeTab: renderFreeTopic, resetAll,
     installApp, toggleReminder, setReminderTime,
     authTab, authSubmit, logout, adminSetPass, adminResetUser, adminDeleteUser, togglePass,
-    togglePush, setPushTime, doneMission, startTestOut, setMinutes,
+    togglePush, setPushTime, doneMission, startTestOut, setMinutes, toggleStage, toggleTopicGroup,
     learnNext, learnAnswer, learnCheckType, learnCheckScramble, learnPick, learnUnpick,
     learnSpeakStart, learnSpeakSkip,
   };
