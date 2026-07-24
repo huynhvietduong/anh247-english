@@ -1860,8 +1860,14 @@ const App = (() => {
   function setupPwa() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js')
-        .then(r => { swReg = r; })
+        .then(r => { swReg = r; r.update && r.update(); })
         .catch(() => {}); // file:// hoặc trình duyệt cũ: bỏ qua, app vẫn chạy bình thường
+      // Có bản cập nhật mới → tự tải lại 1 lần để dùng ngay (không phải chờ lần mở sau)
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (sessionStorage.getItem('ed_reloaded')) return;   // chặn lặp vô hạn
+        sessionStorage.setItem('ed_reloaded', '1');
+        location.reload();
+      });
     }
     window.addEventListener('beforeinstallprompt', e => {
       e.preventDefault();

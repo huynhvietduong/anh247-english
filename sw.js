@@ -1,20 +1,27 @@
 // Service worker: cho phép cài đặt PWA, chạy offline và hiển thị thông báo
 const CACHE = 'englishdaily-v12';
+const ASSET_V = '12';                 // phải khớp với ?v= trong index.html
 const SHELL = [
   './',
   './index.html',
-  './style.css',
-  './data.js',
-  './data2.js',
-  './data3.js',
-  './app.js',
+  './style.css?v=' + ASSET_V,
+  './data.js?v=' + ASSET_V,
+  './data2.js?v=' + ASSET_V,
+  './data3.js?v=' + ASSET_V,
+  './app.js?v=' + ASSET_V,
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' → luôn lấy từ mạng, không dùng bản cũ trong bộ đệm HTTP
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => Promise.all(SHELL.map(u =>
+        fetch(new Request(u, { cache: 'reload' })).then(r => r.ok && c.put(u, r)).catch(() => {}))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
