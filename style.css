@@ -226,6 +226,11 @@ select#mpd:focus{border-color:var(--primary)}
 }
 .learn-input:focus{border-color:var(--primary)}
 .learn-hint{color:var(--muted);font-size:12.5px}
+.cloze-sent{
+  margin-top:12px;padding:14px 16px;background:var(--panel2);border:1px solid var(--border);
+  border-radius:12px;font-size:17px;font-weight:600;line-height:1.6;font-style:italic;
+}
+.learn-stage .mic-btn{margin:4px auto}
 .learn-fb{min-height:26px;font-size:14.5px;line-height:1.6}
 .learn-fb.good{color:var(--green)}
 .learn-fb.bad{color:var(--red)}

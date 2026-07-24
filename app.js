@@ -944,16 +944,31 @@ const App = (() => {
     nextBatch();
   }
 
+  // Tách câu ví dụ thành dạng khuyết (che chính từ/cụm đang học)
+  function clozeOf(v) {
+    const esc0 = v.w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(esc0, 'i');
+    if (!re.test(v.ex)) return null;
+    return v.ex.replace(re, '_____');
+  }
+
+  // Chọn ngẫu nhiên các dạng bài cho một mục: 2 bài nhận diện + 1 bài tự sản sinh
+  function buildTestsFor(v) {
+    const multi = v.w.includes(' ');
+    const hasCloze = !!clozeOf(v);
+    let recog = ['mc_word', 'mc_meaning', 'listen', 'listen_mean'];
+    if (hasCloze) recog.push('cloze_mc');
+    let prod = multi ? ['scramble', 'speak'] : ['type', 'speak'];
+    if (hasCloze && !multi) prod.push('cloze_type');
+    recog = shuffle(recog); prod = shuffle(prod);
+    return [{ type: recog[0], v }, { type: recog[1], v }, { type: prod[0], v }];
+  }
+
   function nextBatch() {
     const items = LS.items.slice(LS.bi * BATCH, (LS.bi + 1) * BATCH);
     if (!items.length) return finishLearn();
-    // Giới thiệu từng từ, rồi trộn các bài kiểm tra của cả nhóm
-    const tests = [];
-    items.forEach(v => {
-      tests.push({ type: 'mc', v, mode: 'meaning' });                       // nhận diện nghĩa
-      tests.push({ type: 'listen', v });                                    // nghe hiểu
-      tests.push({ type: v.w.includes(' ') ? 'scramble' : 'type', v });     // tự sản sinh
-    });
+    // Giới thiệu từng từ, rồi trộn tất cả bài kiểm tra của cả nhóm
+    const tests = items.flatMap(buildTestsFor);
     LS.queue = items.map(v => ({ type: 'present', v })).concat(shuffle(tests));
     LS.bi++;
     renderLearnTurn();
@@ -996,31 +1011,43 @@ const App = (() => {
       return;
     }
 
-    if (t.type === 'mc' || t.type === 'listen') {
-      const listen = t.type === 'listen';
-      const opts = listen ? mcOptions(v, 'w') : mcOptions(v, 'w');
-      const q = listen ? '🔊 Bạn vừa nghe từ/cụm nào?' : `Chọn từ/cụm có nghĩa: <b>“${esc(v.m)}”</b>`;
+    // --- Nhóm bài trắc nghiệm (chọn phương án đúng) ---
+    const MC = {
+      mc_word:     { tag: '🧠 Nhận diện', key: 'w', q: () => `Chọn từ/cụm có nghĩa: <b>“${esc(v.m)}”</b>`, play: false },
+      mc_meaning:  { tag: '🇻🇳 Hiểu nghĩa', key: 'm', q: () => `<b>“${esc(v.w)}”</b> có nghĩa là gì?`, play: true },
+      listen:      { tag: '👂 Nghe hiểu', key: 'w', q: () => '🔊 Bạn vừa nghe từ/cụm nào?', play: true, auto: true },
+      listen_mean: { tag: '👂 Nghe &amp; hiểu', key: 'm', q: () => '🔊 Nghe rồi chọn nghĩa đúng:', play: true, auto: true },
+      cloze_mc:    { tag: '🧩 Chọn từ còn thiếu', key: 'w', q: () => `Chọn đáp án điền vào chỗ trống:<div class="cloze-sent">“${esc(clozeOf(v))}”</div>`, play: false },
+    };
+    if (MC[t.type]) {
+      const c = MC[t.type];
+      const opts = mcOptions(v, c.key);
       main().innerHTML = `${learnProgress()}
         <div class="learn-stage">
-          <div class="learn-tag">${listen ? '👂 Nghe hiểu' : '🧠 Nhận diện'}</div>
-          <div class="learn-q">${q}
-            ${listen ? `<button class="speak-btn" onclick="App.speak('${js(v.w)}')">🔊</button>` : ''}</div>
+          <div class="learn-tag">${c.tag}</div>
+          <div class="learn-q">${c.q()}
+            ${c.play ? `<button class="speak-btn" onclick="App.speak('${js(v.w)}')">🔊</button>` : ''}</div>
           <div class="quiz-opts" id="learn-opts">
             ${opts.map((o, i) => `<button class="opt" onclick="App.learnAnswer(${i},${o.ok})">${esc(o.text)}</button>`).join('')}
           </div>
         </div>`;
-      if (listen) setTimeout(() => speak(v.w), 300);
+      LS.answerKey = c.key;                       // để tô đúng đáp án khi trả lời sai
+      if (c.auto) setTimeout(() => speak(v.w), 300);
       return;
     }
 
-    if (t.type === 'type') {
+    // --- Gõ đáp án: tự viết hoặc điền vào chỗ trống ---
+    if (t.type === 'type' || t.type === 'cloze_type') {
+      const isCloze = t.type === 'cloze_type';
       main().innerHTML = `${learnProgress()}
         <div class="learn-stage">
-          <div class="learn-tag">⌨️ Tự viết</div>
-          <div class="learn-q">Gõ từ tiếng Anh có nghĩa: <b>“${esc(v.m)}”</b></div>
+          <div class="learn-tag">${isCloze ? '✏️ Điền khuyết' : '⌨️ Tự viết'}</div>
+          <div class="learn-q">${isCloze
+            ? `Điền từ còn thiếu vào chỗ trống:<div class="cloze-sent">“${esc(clozeOf(v))}”</div>`
+            : `Gõ từ tiếng Anh có nghĩa: <b>“${esc(v.m)}”</b>`}</div>
           <input id="learn-input" class="learn-input" type="text" autocomplete="off" autocapitalize="off"
                  spellcheck="false" placeholder="Gõ tại đây…">
-          <div class="learn-hint">Gợi ý: ${v.w.length} chữ cái, bắt đầu bằng “${esc(v.w[0])}”</div>
+          <div class="learn-hint">Gợi ý: ${v.w.length} chữ cái, bắt đầu bằng “${esc(v.w[0])}”${isCloze ? '' : ` · nghĩa: ${esc(v.m)}`}</div>
           <div id="learn-fb" class="learn-fb"></div>
           <button class="btn btn-primary btn-lg" style="max-width:420px" onclick="App.learnCheckType()">Kiểm tra</button>
         </div>`;
@@ -1030,12 +1057,64 @@ const App = (() => {
       return;
     }
 
-    // scramble: ghép các từ thành câu đúng thứ tự
-    const words = v.w.split(/\s+/);
-    LS.scrambled = shuffle(words.map((w, i) => ({ w, i })));
+    // --- Nói theo (chấm điểm phát âm) ---
+    if (t.type === 'speak') { renderLearnSpeak(v); return; }
+
+    // --- Ghép câu: sắp xếp các mảnh thành đúng thứ tự ---
+    LS.scrambled = shuffle(v.w.split(/\s+/).map((w, i) => ({ w, i })));
     LS.picked = [];
     renderScramble(v);
   }
+
+  function renderLearnSpeak(v) {
+    const supported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    main().innerHTML = `${learnProgress()}
+      <div class="learn-stage">
+        <div class="learn-tag">🎤 Nói theo</div>
+        <div class="learn-q">Đọc to cụm sau bằng tiếng Anh:</div>
+        <div class="present-card" style="padding:22px">
+          <div class="pc-word" style="font-size:26px">${esc(v.w)}</div>
+          <div class="pc-mean" style="font-size:15px">${esc(v.m)}</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+          <button class="btn btn-outline btn-sm" onclick="App.speak('${js(v.w)}')">🔊 Nghe mẫu</button>
+          <button class="btn btn-outline btn-sm" onclick="App.speak('${js(v.w)}',0.6)">🐢 Nghe chậm</button>
+        </div>
+        <div class="mic-btn" id="learn-mic" onclick="App.learnSpeakStart()">🎙️</div>
+        <div style="color:var(--muted);font-size:13px">${supported ? 'Nhấn micro rồi đọc to' : '⚠️ Trình duyệt này không chấm được phát âm'}</div>
+        <div id="learn-fb" class="learn-fb"></div>
+        <button class="btn btn-ghost" onclick="App.learnSpeakSkip()">${supported ? 'Bỏ qua chấm điểm ✓' : 'Tôi đã đọc xong ✓'}</button>
+      </div>`;
+    setTimeout(() => speak(v.w), 350);
+  }
+
+  let learnRecog = null;
+  function learnSpeakStart() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const fb = document.getElementById('learn-fb');
+    if (!SR) { fb.className = 'learn-fb bad'; fb.textContent = '⚠️ Hãy dùng Chrome để chấm phát âm, hoặc bấm "Tôi đã đọc xong".'; return; }
+    if (learnRecog) { learnRecog.stop(); return; }
+    const v = LS.queue[0].v;
+    const mic = document.getElementById('learn-mic');
+    learnRecog = new SR();
+    learnRecog.lang = 'en-US';
+    learnRecog.interimResults = false;
+    mic.classList.add('rec');
+    fb.className = 'learn-fb';
+    fb.textContent = 'Đang nghe… đọc to lên nhé 🎧';
+    learnRecog.onresult = e => {
+      const said = e.results[0][0].transcript;
+      const score = similarity(v.w, said);
+      const ok = score >= 60;
+      fb.innerHTML = `Bạn nói: "<i>${esc(said)}</i>" — <b>${score} điểm</b>`;
+      setTimeout(() => showLearnFeedback(ok, v), 500);
+    };
+    learnRecog.onerror = () => { fb.className = 'learn-fb bad'; fb.textContent = '⚠️ Không nghe được. Thử lại hoặc bấm "Bỏ qua chấm điểm".'; };
+    learnRecog.onend = () => { mic.classList.remove('rec'); learnRecog = null; };
+    try { learnRecog.start(); } catch (e) {}
+  }
+
+  function learnSpeakSkip() { showLearnFeedback(true, LS.queue[0].v); }
 
   function renderScramble(v) {
     main().innerHTML = `${learnProgress()}
@@ -1076,11 +1155,13 @@ const App = (() => {
   }
 
   function learnAnswer(i, ok) {
+    const v = LS.queue[0].v;
+    const right = norm(v[LS.answerKey || 'w']);          // đáp án đúng có thể là từ hoặc nghĩa
     const btns = document.querySelectorAll('#learn-opts .opt');
     btns.forEach(b => b.disabled = true);
-    btns.forEach(b => { if (norm(b.textContent) === norm(LS.queue[0].v.w)) b.classList.add('correct'); });
+    btns.forEach(b => { if (norm(b.textContent) === right) b.classList.add('correct'); });
     if (!ok) btns[i].classList.add('wrong');
-    showLearnFeedback(ok, LS.queue[0].v, true);
+    showLearnFeedback(ok, v, true);
   }
 
   function showLearnFeedback(ok, v, silent) {
@@ -2068,5 +2149,6 @@ const App = (() => {
     authTab, authSubmit, logout, adminSetPass, adminResetUser, adminDeleteUser, togglePass,
     togglePush, setPushTime, doneMission, startTestOut, setMinutes,
     learnNext, learnAnswer, learnCheckType, learnCheckScramble, learnPick, learnUnpick,
+    learnSpeakStart, learnSpeakSkip,
   };
 })();
