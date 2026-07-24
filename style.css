@@ -1,34 +1,84 @@
 :root{
-  --bg:#0f1420;
-  --panel:#1a2132;
-  --panel2:#222b42;
-  --border:#2e3a58;
-  --text:#e8ecf6;
-  --muted:#8b96b3;
-  --primary:#4f7cff;
-  --primary2:#6e93ff;
-  --green:#2ecc8f;
-  --yellow:#ffc94d;
-  --red:#ff6b7a;
-  --radius:14px;
+  /* Nền: xanh mực đêm sâu để các vệt sáng aurora nổi bật */
+  --bg:#080b1a;
+  /* Kính mờ (glassmorphism) — trắng trong suốt, độ mờ tăng dần theo lớp */
+  --panel:rgba(255,255,255,.10);
+  --panel2:rgba(255,255,255,.16);
+  --panel3:rgba(255,255,255,.18);
+  --border:rgba(255,255,255,.20);
+  --border-strong:rgba(255,255,255,.28);
+  --glass-blur:blur(20px) saturate(170%);
+  --shadow:0 8px 32px rgba(0,0,0,.28);
+  --shadow-lg:0 20px 60px rgba(0,0,0,.45);
+
+  --text:#f4f7ff;
+  --muted:#a8b6d9;
+
+  /* Bảng màu tươi — dải aurora lam → tím → hồng */
+  --primary:#5b8dff;
+  --primary2:#8aa9ff;
+  --cyan:#22d3ee;
+  --violet:#a78bfa;
+  --pink:#f472b6;
+  --green:#34e0a1;
+  --yellow:#ffd166;
+  --red:#ff7a90;
+  --grad:linear-gradient(135deg,#22d3ee 0%,#6366f1 50%,#ec4899 100%);
+  --grad-soft:linear-gradient(135deg,rgba(34,211,238,.22),rgba(139,92,246,.22),rgba(236,72,153,.22));
+  --radius:18px;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html{touch-action:manipulation} /* chặn double-tap zoom, giữ vuốt/chạm bình thường */
 body{
-  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
   background:var(--bg);color:var(--text);
   min-height:100vh;
   touch-action:manipulation;
+  -webkit-font-smoothing:antialiased;
+  letter-spacing:.1px;
 }
+/* Lớp nền aurora: các quầng sáng màu nằm CỐ ĐỊNH phía sau, để kính mờ có gì mà "mờ" */
+body::before{
+  content:'';position:fixed;inset:-20%;z-index:-2;pointer-events:none;
+  background:
+    radial-gradient(46% 50% at 14% 6%,  rgba(99,102,241,.85) 0%, transparent 66%),
+    radial-gradient(42% 46% at 88% 4%,  rgba(34,211,238,.72) 0%, transparent 66%),
+    radial-gradient(50% 52% at 82% 72%, rgba(236,72,153,.66) 0%, transparent 68%),
+    radial-gradient(46% 48% at 8% 84%,  rgba(139,92,246,.70) 0%, transparent 68%),
+    radial-gradient(52% 46% at 48% 42%, rgba(56,189,248,.38) 0%, transparent 72%),
+    radial-gradient(40% 40% at 60% 18%, rgba(167,139,250,.42) 0%, transparent 70%);
+  filter:blur(30px);
+  animation:aurora 26s ease-in-out infinite alternate;
+}
+/* Lớp phủ tối nhẹ giữ chữ luôn đủ tương phản trên nền màu */
+body::after{
+  content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:linear-gradient(180deg,rgba(8,11,26,.10),rgba(8,11,26,.34));
+}
+@keyframes aurora{
+  0%  {transform:translate3d(0,0,0) scale(1)}
+  50% {transform:translate3d(2%,-2%,0) scale(1.06)}
+  100%{transform:translate3d(-2%,2%,0) scale(1.02)}
+}
+@media (prefers-reduced-motion:reduce){ body::before{animation:none} }
+
 .hidden{display:none!important}
 button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
-input{font-family:inherit}
+input,select{font-family:inherit}
+
+/* ===== Lớp kính dùng chung ===== */
+.panel,.onboard-box,.today-card,.stat-card,.present-card,.quiz-q,.dialog-box,
+.speak-card,.fc-face,.stage-head,.mission-card,.cando-banner,.ref-note,.toast,
+.cloze-sent,.scr-answer{
+  -webkit-backdrop-filter:var(--glass-blur);
+  backdrop-filter:var(--glass-blur);
+}
 
 /* ===== Onboarding ===== */
 #screen-onboard{
   min-height:100vh;display:flex;align-items:center;justify-content:center;
   padding:calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom));
-  background:radial-gradient(1200px 600px at 70% -10%,#1d2a4d 0%,var(--bg) 60%);
+  background:transparent;
 }
 .onboard-box{
   width:100%;max-width:560px;background:var(--panel);
@@ -50,18 +100,18 @@ input{font-family:inherit}
   transition:transform .1s,box-shadow .15s,background .15s;
 }
 .btn:active{transform:scale(.97)}
-.btn-primary{background:linear-gradient(135deg,var(--primary),#7a5cff);color:#fff;box-shadow:0 6px 18px rgba(79,124,255,.35)}
+.btn-primary{background:var(--grad);color:#fff;box-shadow:0 8px 24px rgba(99,102,241,.42)}
 .btn-primary:hover{box-shadow:0 8px 24px rgba(79,124,255,.5)}
 .btn-lg{width:100%;padding:15px;font-size:16px;margin-bottom:10px}
 .btn-ghost{color:var(--muted)}
 .btn-ghost:hover{color:var(--text)}
 .btn-outline{border:1px solid var(--border);color:var(--text)}
 .btn-outline:hover{border-color:var(--primary);color:var(--primary2)}
-.btn-green{background:var(--green);color:#06281c}
+.btn-green{background:linear-gradient(135deg,#34e0a1,#22d3ee);color:#04241c}
 .btn-sm{padding:7px 14px;font-size:13px;border-radius:9px}
 
 .quiz-progress{height:8px;background:var(--panel2);border-radius:99px;overflow:hidden;margin-bottom:18px}
-.bar{height:100%;background:linear-gradient(90deg,var(--primary),#7a5cff);width:0%;transition:width .3s;border-radius:99px}
+.bar{height:100%;background:var(--grad);width:0%;transition:width .3s;border-radius:99px}
 .qnum{color:var(--muted);font-size:13px;margin-bottom:10px}
 .ob-question{font-size:20px;font-weight:600;margin-bottom:22px;line-height:1.5}
 .ob-options{display:flex;flex-direction:column;gap:10px}
@@ -69,7 +119,7 @@ input{font-family:inherit}
   padding:14px 16px;border-radius:12px;border:1px solid var(--border);
   background:var(--panel2);font-size:15px;text-align:left;transition:all .15s;
 }
-.ob-options .opt:hover{border-color:var(--primary);background:#26324f}
+.ob-options .opt:hover{border-color:var(--border-strong);background:var(--panel2)}
 .result-icon{font-size:52px;margin-bottom:12px}
 #ob-result-desc{color:var(--muted);margin:12px 0 24px;line-height:1.6}
 
@@ -101,11 +151,11 @@ main{flex:1;padding:34px 42px;max-width:1060px}
 .stat-card .ico{font-size:22px}
 
 .today-card{
-  background:linear-gradient(135deg,#233158,#2b2350);border:1px solid #3a4a78;
+  background:var(--grad-soft);border:1px solid var(--border-strong);
   border-radius:18px;padding:26px 28px;margin-bottom:26px;
   display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;
 }
-.today-card h3{font-size:13px;color:#9fb4ff;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.today-card h3{font-size:13px;color:var(--cyan);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
 .today-card .t-title{font-size:22px;font-weight:800}
 .today-card .t-desc{color:var(--muted);margin-top:6px;font-size:14px}
 
@@ -128,8 +178,8 @@ main{flex:1;padding:34px 42px;max-width:1060px}
 .day-card.current{border-color:var(--primary);box-shadow:0 0 0 2px rgba(79,124,255,.3)}
 .day-card.locked{opacity:.42;cursor:not-allowed}
 .day-card.locked::after{content:"🔒";position:absolute;top:10px;right:10px;font-size:12px}
-.day-card.review{background:linear-gradient(135deg,#2a2440,#1f2a40)}
-.day-card.checkpoint{background:linear-gradient(135deg,#3a2a1a,#2a2418);border-color:#5a4326}
+.day-card.review{background:linear-gradient(135deg,rgba(139,92,246,.16),rgba(34,211,238,.12))}
+.day-card.checkpoint{background:linear-gradient(135deg,rgba(255,209,102,.20),rgba(236,72,153,.12));border-color:rgba(255,209,102,.42)}
 .day-card.checkpoint.done{border-color:var(--green)}
 
 /* ===== Chặng (stage) trên lộ trình ===== */
@@ -146,7 +196,7 @@ main{flex:1;padding:34px 42px;max-width:1060px}
 .stage-badge.cur{background:rgba(79,124,255,.16);color:var(--primary2)}
 .stage-goal{color:var(--muted);font-size:13px;margin-top:8px;line-height:1.5}
 .stage-clear{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin:0 auto 18px;max-width:420px;background:var(--panel2)}
-.t-stage{font-size:12px;font-weight:700;color:#9fb4ff;margin-bottom:6px}
+.t-stage{font-size:12px;font-weight:700;color:var(--cyan);margin-bottom:6px}
 select#mpd{
   background:var(--panel2);border:1px solid var(--border);color:var(--text);
   border-radius:9px;padding:8px 12px;font-size:14px;outline:none;cursor:pointer;
@@ -159,7 +209,7 @@ select#mpd:focus{border-color:var(--primary)}
 .lesson-head .back:hover{color:var(--text)}
 .tabs{display:flex;gap:8px;margin-bottom:22px;flex-wrap:wrap}
 .tab{padding:9px 18px;border-radius:99px;border:1px solid var(--border);font-size:14px;font-weight:600;color:var(--muted)}
-.tab.active{background:var(--primary);border-color:var(--primary);color:#fff}
+.tab.active{background:var(--grad);border-color:transparent;color:#fff}
 .tab:not(.active):hover{color:var(--text);border-color:var(--muted)}
 
 .vocab-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
@@ -169,7 +219,7 @@ select#mpd:focus{border-color:var(--primary)}
 .vocab-card .v-mean{font-size:14.5px;margin-bottom:6px}
 .vocab-card .v-ex{color:var(--muted);font-size:13px;font-style:italic;line-height:1.5}
 .speak-btn{font-size:16px;padding:4px 8px;border-radius:8px;background:var(--panel2)}
-.speak-btn:hover{background:#2c3757}
+.speak-btn:hover{background:var(--panel3)}
 
 .phrase-item{
   background:var(--panel);border:1px solid var(--border);border-radius:12px;
@@ -193,9 +243,9 @@ select#mpd:focus{border-color:var(--primary)}
 .dlg-line{display:flex;gap:12px;margin-bottom:14px;align-items:flex-start}
 .dlg-line .who{
   flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
-  font-weight:800;font-size:13px;background:var(--primary);color:#fff;
+  font-weight:800;font-size:13px;background:linear-gradient(135deg,#22d3ee,#6366f1);color:#fff;
 }
-.dlg-line.b .who{background:#8a5cff}
+.dlg-line.b .who{background:linear-gradient(135deg,#a78bfa,#ec4899)}
 .dlg-line .bubble{background:var(--panel2);border-radius:4px 14px 14px 14px;padding:10px 14px;max-width:75%}
 .dlg-line .bubble .en{font-weight:600;font-size:14.5px}
 .dlg-line .bubble .vi{color:var(--muted);font-size:12.5px;margin-top:3px}
@@ -204,7 +254,7 @@ select#mpd:focus{border-color:var(--primary)}
 .learn-top{display:flex;align-items:center;gap:12px;margin-bottom:22px}
 .learn-top .back{font-size:14px;color:var(--muted);flex-shrink:0}
 .learn-bar{flex:1;height:10px;background:var(--panel2);border-radius:99px;overflow:hidden}
-.learn-bar div{height:100%;background:linear-gradient(90deg,var(--green),#5eead4);border-radius:99px;transition:width .35s}
+.learn-bar div{height:100%;background:linear-gradient(90deg,#34e0a1,#22d3ee);border-radius:99px;transition:width .35s}
 .learn-count{font-size:13px;font-weight:700;color:var(--muted);flex-shrink:0;font-variant-numeric:tabular-nums}
 .learn-stage{max-width:560px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center}
 .learn-tag{
@@ -214,7 +264,7 @@ select#mpd:focus{border-color:var(--primary)}
 .learn-q{font-size:19px;font-weight:600;line-height:1.5}
 .learn-stage .quiz-opts{width:100%}
 .present-card{
-  width:100%;background:linear-gradient(135deg,#233158,#2b2350);border:1px solid #3a4a78;
+  width:100%;background:var(--grad-soft);border:1px solid var(--border-strong);
   border-radius:20px;padding:30px 24px;display:flex;flex-direction:column;align-items:center;gap:10px;
 }
 .pc-word{font-size:34px;font-weight:800;line-height:1.2}
@@ -246,7 +296,7 @@ select#mpd:focus{border-color:var(--primary)}
   font-size:16px;font-weight:600;transition:all .12s;
 }
 .scr-tile:hover{border-color:var(--primary)}
-.scr-tile.picked{background:var(--primary);border-color:var(--primary);color:#fff}
+.scr-tile.picked{background:var(--grad);border-color:transparent;color:#fff}
 .ref-note{
   background:rgba(255,201,77,.09);border:1px solid rgba(255,201,77,.28);
   border-radius:12px;padding:11px 15px;font-size:13.5px;line-height:1.55;margin-bottom:16px;
@@ -280,7 +330,7 @@ select#mpd:focus{border-color:var(--primary)}
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:26px;text-align:center;
   background:var(--panel);border:1px solid var(--border);
 }
-.fc-face.back{transform:rotateY(180deg);background:linear-gradient(135deg,#233158,#2b2350)}
+.fc-face.back{transform:rotateY(180deg);background:var(--grad-soft)}
 .fc-face .big{font-size:30px;font-weight:800}
 .fc-face .ipa{color:var(--primary2)}
 .fc-face .hint{color:var(--muted);font-size:12.5px;position:absolute;bottom:14px}
@@ -294,9 +344,9 @@ select#mpd:focus{border-color:var(--primary)}
 .speak-vi{color:var(--muted);margin-bottom:22px}
 .mic-btn{
   width:84px;height:84px;border-radius:50%;font-size:34px;margin:10px auto;display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(135deg,var(--primary),#7a5cff);box-shadow:0 8px 26px rgba(79,124,255,.4);transition:all .2s;
+  background:var(--grad);box-shadow:0 10px 30px rgba(99,102,241,.5);transition:all .2s;
 }
-.mic-btn.rec{background:linear-gradient(135deg,var(--red),#ff8f6b);animation:pulse 1.2s infinite}
+.mic-btn.rec{background:linear-gradient(135deg,#ff7a90,#ffb86b);animation:pulse 1.2s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,107,122,.5)}70%{box-shadow:0 0 0 22px rgba(255,107,122,0)}100%{box-shadow:0 0 0 0 rgba(255,107,122,0)}}
 .speak-result{margin-top:18px;font-size:15px;min-height:52px;line-height:1.6}
 .score-badge{display:inline-block;padding:6px 16px;border-radius:99px;font-weight:800;font-size:17px;margin-top:6px}
@@ -329,7 +379,7 @@ select#mpd:focus{border-color:var(--primary)}
 @keyframes toastIn{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
 
 .progress-line{height:9px;background:var(--panel2);border-radius:99px;overflow:hidden;margin:8px 0}
-.progress-line .fill{height:100%;background:linear-gradient(90deg,var(--green),#5eead4);border-radius:99px;transition:width .4s}
+.progress-line .fill{height:100%;background:linear-gradient(90deg,#34e0a1,#22d3ee);border-radius:99px;transition:width .4s}
 
 .empty-note{color:var(--muted);text-align:center;padding:40px 0;line-height:1.7}
 
@@ -337,7 +387,7 @@ select#mpd:focus{border-color:var(--primary)}
 #screen-login{
   min-height:100vh;display:flex;align-items:center;justify-content:center;
   padding:calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom));
-  background:radial-gradient(1200px 600px at 70% -10%,#1d2a4d 0%,var(--bg) 60%);
+  background:transparent;
 }
 .auth-tabs{display:flex;gap:8px;justify-content:center;margin-bottom:20px}
 .auth-inp{
@@ -383,11 +433,11 @@ select#mpd:focus{border-color:var(--primary)}
 .btn-danger{border-color:rgba(255,107,122,.4);color:var(--red)}
 .btn-danger:hover{border-color:var(--red)}
 .mini-bar{height:5px;background:var(--panel2);border-radius:99px;overflow:hidden;margin-top:5px;min-width:70px}
-.mini-bar div{height:100%;background:linear-gradient(90deg,var(--green),#5eead4);border-radius:99px}
+.mini-bar div{height:100%;background:linear-gradient(90deg,#34e0a1,#22d3ee);border-radius:99px}
 .content-stats{display:flex;gap:16px;flex-wrap:wrap;font-size:14px;font-weight:600}
 
 /* ===== Thử thách đời thực ===== */
-.mission-card{border-color:rgba(255,201,77,.35);background:linear-gradient(135deg,#2a2540,#1f2a40)}
+.mission-card{border-color:rgba(255,201,77,.35);background:linear-gradient(135deg,rgba(255,209,102,.14),rgba(236,72,153,.12))}
 .mission-card.done{border-color:rgba(46,204,143,.4)}
 
 /* ===== Cài đặt (panel) ===== */
@@ -415,7 +465,9 @@ input[type="time"]:focus{border-color:var(--primary)}
     width:100%;height:auto;flex-direction:row;align-items:stretch;
     padding:6px 8px calc(6px + env(safe-area-inset-bottom));
     border-right:none;border-top:1px solid var(--border);
-    background:rgba(26,33,50,.96);backdrop-filter:blur(12px);
+    background:rgba(12,16,36,.62);
+    -webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);
+    box-shadow:0 -8px 32px rgba(0,0,0,.35);
   }
   .logo{display:none}
   .sidebar-foot{display:none}
@@ -484,4 +536,111 @@ input[type="time"]:focus{border-color:var(--primary)}
   .stat-grid{gap:8px}
   .nav-item{font-size:19px;min-height:52px}
   .topic-grid{grid-template-columns:1fr}
+}
+
+/* ============================================================
+   HOÀN THIỆN HIỆU ỨNG KÍNH — viền sáng, đổ bóng, tương phản
+   (đặt cuối tệp để ghi đè các quy tắc phía trên)
+   ============================================================ */
+
+/* Đổ bóng mềm cho các tấm kính lớn để chúng "nổi" khỏi nền aurora */
+.panel,.today-card,.stat-card,.present-card,.quiz-q,.dialog-box,.speak-card,
+.stage-head,.mission-card,.onboard-box,.fc-face{ box-shadow:var(--shadow) }
+.onboard-box{ box-shadow:var(--shadow-lg) }
+
+/* Vệt sáng mảnh ở mép trên — dấu hiệu nhận biết của bề mặt kính */
+.panel,.today-card,.present-card,.onboard-box,.stat-card,.stage-head{ position:relative;overflow:hidden }
+.panel::before,.today-card::before,.present-card::before,
+.onboard-box::before,.stat-card::before,.stage-head::before{
+  content:'';position:absolute;top:0;left:12%;right:12%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);
+}
+
+/* Thanh bên / thanh điều hướng cũng là kính */
+.sidebar{
+  background:rgba(255,255,255,.05);
+  -webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
+  border-right:1px solid var(--border);
+}
+.nav-item.active{
+  background:var(--grad-soft);color:#fff;
+  box-shadow:inset 0 0 0 1px var(--border-strong);
+}
+.nav-item:hover{background:var(--panel2);color:var(--text)}
+
+/* Thẻ nhỏ lặp nhiều lần: chỉ dùng nền trong suốt (không blur) để giữ mượt trên điện thoại */
+.vocab-card,.phrase-item,.day-card,.topic-card,.quiz-opts .opt,.ob-options .opt,
+.scr-tile,.learn-input,.auth-inp,#inp-name,input[type="time"],select#mpd{
+  background:var(--panel);border:1px solid var(--border);
+}
+.vocab-card,.phrase-item,.topic-card,.day-card{ box-shadow:0 4px 16px rgba(0,0,0,.16) }
+
+/* Trạng thái chạm/di chuột sáng lên rõ rệt */
+.quiz-opts .opt:hover:not(:disabled),.ob-options .opt:hover,.scr-tile:hover,
+.vocab-card:hover,.topic-card:hover{
+  background:var(--panel2);border-color:var(--border-strong);
+}
+.day-card:not(.locked):hover{border-color:var(--border-strong);background:var(--panel2)}
+.day-card.current{border-color:transparent;box-shadow:0 0 0 2px var(--cyan),0 8px 28px rgba(34,211,238,.28)}
+.day-card.done{border-color:rgba(52,224,161,.5)}
+.day-card.done::after{color:var(--green)}
+
+/* Đáp án đúng / sai — màu tươi, có quầng sáng */
+.quiz-opts .opt.correct{
+  background:linear-gradient(135deg,rgba(52,224,161,.26),rgba(34,211,238,.20));
+  border-color:var(--green);color:#eafff6;box-shadow:0 0 22px rgba(52,224,161,.30);
+}
+.quiz-opts .opt.wrong{
+  background:linear-gradient(135deg,rgba(255,122,144,.24),rgba(236,72,153,.18));
+  border-color:var(--red);color:#fff0f3;box-shadow:0 0 22px rgba(255,122,144,.26);
+}
+
+/* Ô nhập: viền sáng khi đang gõ */
+.auth-inp:focus,#inp-name:focus,.learn-input:focus,input[type="time"]:focus,select#mpd:focus{
+  border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,211,238,.18);
+}
+.learn-input{background:var(--panel2)}
+
+/* Nút viền — nền kính nhẹ thay vì trong suốt hoàn toàn */
+.btn-outline{background:var(--panel);border:1px solid var(--border)}
+.btn-outline:hover{background:var(--panel2);border-color:var(--border-strong);color:#fff}
+.btn-primary:hover{box-shadow:0 12px 34px rgba(99,102,241,.70);filter:brightness(1.06)}
+
+/* Chữ chuyển sắc CHỈ dùng cho chỗ không có emoji —
+   background-clip:text làm emoji mất màu, biến 🇬🇧 thành chữ "GB" phẳng. */
+.pc-word{
+  background:linear-gradient(120deg,#ffffff,#a5f3fc);
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+}
+.view-title{color:#fff;text-shadow:0 2px 18px rgba(34,211,238,.22)}
+.logo-big{color:#fff;text-shadow:0 2px 22px rgba(139,92,246,.45)}
+
+/* Huy hiệu & nhãn dùng màu tươi hơn */
+.learn-tag{background:var(--grad-soft);color:#e0f2fe;box-shadow:inset 0 0 0 1px var(--border)}
+.chunk-use{background:rgba(34,211,238,.16);color:#a5f3fc}
+.chunk-item{border-left:3px solid transparent;border-image:var(--grad) 1}
+.role-badge{background:rgba(255,209,102,.18);color:var(--yellow)}
+.toast{background:rgba(20,26,52,.72);border:1px solid var(--border-strong);box-shadow:var(--shadow-lg)}
+
+/* Bàn phím: viền tiêu điểm luôn thấy rõ (khả năng tiếp cận) */
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+
+/* Thẻ flashcard: mặt trước kính trong, mặt sau rực rỡ hơn */
+.fc-face{background:var(--panel);border:1px solid var(--border)}
+.fc-face.back{background:var(--grad-soft);border-color:var(--border-strong)}
+
+/* Bảng quản trị đọc rõ hơn trên nền kính */
+.admin-table th{color:#c7d5f5}
+.admin-table td{border-bottom:1px solid var(--border)}
+
+/* Điện thoại: nội dung bài tập ở trên, nút chính đẩy xuống đáy cho vừa tầm ngón cái */
+@media (max-width:760px){
+  .learn-stage{
+    min-height:calc(100dvh - 210px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    justify-content:flex-start;
+  }
+  .learn-stage > .btn-lg:last-child,
+  .learn-stage > .btn-ghost:last-child{ margin-top:auto }
+  .learn-stage .quiz-opts{ margin-bottom:auto }
 }

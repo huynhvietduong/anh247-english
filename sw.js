@@ -1,6 +1,6 @@
 // Service worker: cho phép cài đặt PWA, chạy offline và hiển thị thông báo
-const CACHE = 'englishdaily-v13';
-const ASSET_V = '13';                 // phải khớp với ?v= trong index.html
+const CACHE = 'englishdaily-v14';
+const ASSET_V = '14';                 // phải khớp với ?v= trong index.html
 const SHELL = [
   './',
   './index.html',

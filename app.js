@@ -1126,7 +1126,7 @@ const App = (() => {
     // --- Nhóm bài trắc nghiệm (chọn phương án đúng) ---
     const MC = {
       mc_word:     { tag: '🧠 Nhận diện', key: 'w', q: () => `Chọn từ/cụm có nghĩa: <b>“${esc(v.m)}”</b>`, play: false },
-      mc_meaning:  { tag: '🇻🇳 Hiểu nghĩa', key: 'm', q: () => `<b>“${esc(v.w)}”</b> có nghĩa là gì?`, play: true },
+      mc_meaning:  { tag: '💭 Hiểu nghĩa', key: 'm', q: () => `<b>“${esc(v.w)}”</b> có nghĩa là gì?`, play: true },
       listen:      { tag: '👂 Nghe hiểu', key: 'w', q: () => '🔊 Bạn vừa nghe từ/cụm nào?', play: true, auto: true },
       listen_mean: { tag: '👂 Nghe &amp; hiểu', key: 'm', q: () => '🔊 Nghe rồi chọn nghĩa đúng:', play: true, auto: true },
       cloze_mc:    { tag: '🧩 Chọn từ còn thiếu', key: 'w', q: () => `Chọn đáp án điền vào chỗ trống:<div class="cloze-sent">“${esc(clozeOf(v))}”</div>`, play: false },
