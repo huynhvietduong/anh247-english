@@ -1387,23 +1387,24 @@ const App = (() => {
   }
 
   // ---------- Giao diện quản trị (admin) ----------
-  let adminUsers = null;
+  let adminUsers = null, adminFresh = false;
 
   async function renderAdmin() {
     if (!isAdmin()) { go('dashboard'); return; }
     main().innerHTML = `<div class="view-title">🛠️ Quản trị hệ thống</div>
       <div class="view-sub">Đang tải danh sách học viên từ máy chủ…</div>`;
+    adminFresh = false;
     try {
       const r = await api('/admin/users');
       if (r.status === 403) { toast('⚠️ Tài khoản này không có quyền quản trị'); go('dashboard'); return; }
-      if (r.ok) { adminUsers = r.data.users; online = true; }
+      if (r.ok) { adminUsers = r.data.users; adminFresh = true; online = true; }
     } catch (e) { online = false; }
     drawAdmin();
   }
 
   function drawAdmin() {
-    // Không gọi được máy chủ → hiển thị bản lưu trên máy này (chế độ offline)
-    const offlineMode = !adminUsers;
+    // Không gọi được máy chủ → dùng dữ liệu cũ đã tải, hoặc bản lưu trên máy này
+    const offlineMode = !adminFresh;
     const list = adminUsers || Object.keys(USERS).map(u => {
       const st = loadState(u);
       return {
@@ -1448,7 +1449,7 @@ const App = (() => {
     main().innerHTML = `
       <div class="view-title">🛠️ Quản trị hệ thống</div>
       <div class="view-sub">${offlineMode
-        ? '⚠️ <b style="color:var(--yellow)">Không kết nối được máy chủ</b> — đang hiển thị bản lưu trên máy này. Kết nối mạng để thấy toàn bộ học viên.'
+        ? `⚠️ <b style="color:var(--yellow)">Không kết nối được máy chủ</b> — đang hiển thị ${adminUsers ? 'dữ liệu đã tải trước đó' : 'bản lưu trên máy này'}. Kết nối mạng rồi mở lại để cập nhật.`
         : 'Toàn bộ học viên trên mọi thiết bị, dữ liệu lấy trực tiếp từ máy chủ.'}</div>
       <div class="stat-grid">
         <div class="stat-card"><div class="ico">👥</div><div class="num">${students.length}</div><div class="lbl">Học viên</div></div>
