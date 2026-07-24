@@ -1,5 +1,5 @@
 // Service worker: cho phép cài đặt PWA, chạy offline và hiển thị thông báo
-const CACHE = 'englishdaily-v9';
+const CACHE = 'englishdaily-v10';
 const SHELL = [
   './',
   './index.html',
@@ -41,25 +41,80 @@ self.addEventListener('fetch', e => {
 });
 
 // Nhận thông báo đẩy từ máy chủ (hoạt động cả khi app/trình duyệt đã đóng)
+// Thẻ từ vựng có nút bấm ngay trên thông báo → học & chấm nhớ/quên ngay ở màn hình khóa
 self.addEventListener('push', e => {
   let d = {};
   try { d = e.data.json(); } catch (err) {}
-  e.waitUntil(self.registration.showNotification(d.title || '📚 EnglishDaily', {
+  const opts = {
     body: d.body || 'Đến giờ học tiếng Anh rồi!',
     icon: 'icons/icon-192.png',
     badge: 'icons/icon-192.png',
     tag: 'englishdaily-push',
-    data: { url: d.url || './index.html' },
-  }));
+    renotify: true,
+    requireInteraction: !!d.item,          // thẻ từ vựng: giữ trên màn hình khóa tới khi trả lời
+    data: d,
+  };
+  // Chỉ thẻ từ vựng (có `item`) mới cho bấm trả lời tại chỗ
+  if (d.item) opts.actions = [
+    { action: 'reveal', title: '👁️ Xem nghĩa' },
+    { action: 'know', title: '✓ Đã nhớ' },
+  ];
+  e.waitUntil(self.registration.showNotification(d.title || '📚 EnglishDaily', opts));
 });
 
-// Bấm vào thông báo → mở app
+async function gradeCard(d, remembered) {
+  try {
+    const sub = await self.registration.pushManager.getSubscription();
+    if (!sub) return;
+    await fetch('/api/push/grade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: sub.endpoint, item: d.item, remembered }),
+    });
+  } catch (err) {}
+}
+
+function openApp() {
+  return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) { if ('focus' in c) return c.focus(); }
+    return self.clients.openWindow('./index.html');
+  });
+}
+
 self.addEventListener('notificationclick', e => {
+  const d = e.notification.data || {};
+  const act = e.action;
+
+  // Bước 1: lật thẻ — hiện nghĩa + ví dụ, đổi thành 2 nút chấm điểm
+  if (act === 'reveal') {
+    e.notification.close();
+    e.waitUntil(self.registration.showNotification(`💡 ${d.word || ''} = ${d.meaning || ''}`, {
+      body: d.ex ? `"${d.ex}"\nBạn có nhớ từ này không?` : 'Bạn có nhớ từ này không?',
+      icon: 'icons/icon-192.png', badge: 'icons/icon-192.png',
+      tag: 'englishdaily-push', renotify: true, requireInteraction: true, data: d,
+      actions: [
+        { action: 'know', title: '✓ Đã nhớ' },
+        { action: 'forgot', title: '✗ Chưa nhớ' },
+      ],
+    }));
+    return;
+  }
+
+  // Bước 2: chấm điểm — ghi vào lịch ôn trên máy chủ, không cần mở app
+  if (act === 'know' || act === 'forgot') {
+    e.notification.close();
+    e.waitUntil(gradeCard(d, act === 'know').then(() => {
+      if (act === 'forgot') {   // quên thì cho xem lại nghĩa để nhớ thêm
+        return self.registration.showNotification(`📖 ${d.word || ''} = ${d.meaning || ''}`, {
+          body: d.ex ? `"${d.ex}"\nĐã xếp lịch ôn lại vào ngày mai 💪` : 'Đã xếp lịch ôn lại vào ngày mai 💪',
+          icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'englishdaily-push', data: {},
+        });
+      }
+    }));
+    return;
+  }
+
+  // Chạm vào thân thông báo → mở app
   e.notification.close();
-  e.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-      for (const c of list) { if ('focus' in c) return c.focus(); }
-      return self.clients.openWindow('./index.html');
-    })
-  );
+  e.waitUntil(openApp());
 });

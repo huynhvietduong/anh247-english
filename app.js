@@ -1662,7 +1662,11 @@ const App = (() => {
     for (const [key] of cards) {
       const [tid, ...rest] = key.split('|');
       const v = findItem(tid, rest.join('|'));
-      if (v) q.push({ title: `📚 ${v.w}${v.ipa ? ' ' + v.ipa : ''}`, body: `${v.m} — "${v.ex}" · Chạm để luyện 1 phút` });
+      if (v) q.push({
+        title: `📚 ${v.w}${v.ipa ? ' ' + v.ipa : ''}`,
+        body: 'Bạn còn nhớ nghĩa của từ này không? Bấm để trả lời ngay 👇',
+        item: key, word: v.w, meaning: v.m, ex: v.ex,   // cho phép lật thẻ & chấm ngay trên thông báo
+      });
     }
     // 2) mẫu câu của bài đang học — kèm gợi ý dùng ngoài đời
     const cur = currentDayIdx();
